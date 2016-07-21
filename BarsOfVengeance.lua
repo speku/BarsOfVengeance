@@ -1,3 +1,11 @@
+-- Vengeance Demon Hunter WeakAura for displaying your accumulated health
+-- includes: Soul Shards, Soul Cleave, Soul Carver, Feast of Souls, Devour Souls
+-- and Soul Barrier
+
+-- and your accumulated pain
+-- includes: Immolation Aura, Metamorphosis, Consume Magic
+
+
 ------------------------------------ IDs --------------------------------------
 local FoS = 207697 -- Feast of Souls
 local SCl = 203798 -- Soul Cleave
@@ -20,6 +28,7 @@ local UnitGetTotalAbsorbs = UnitGetTotalAbsorbs
 local UnitAttackPower = UnitAttackPower
 local GetCritChance = GetCritChance
 local GetTime = GetTime
+local GetSpellCount = GetSpellCount
 -------------------------------------------------------------------------------
 
 
@@ -37,7 +46,6 @@ local f = "Frame"
 local res = "resource"
 local t = "type"
 local sbt = "statusBarTexture"
-local c = "color"
 local sbMin = 0
 local sbMax = 100
 local clrIA = "colorIntensityActive"
@@ -71,11 +79,12 @@ local hpFrame = CreateFrame(f,nil,frame)
 
 
 ------------------------------- settings ---------------------------------------
-function Setting(lvl, clr, calc, events)
+function Setting(lvl, clr, Update, events)
   return {
     enabled = true,
+    crit = true,
     lvl = lvl,
-    calc = calc,
+    Update = Update,
     clr = clr
     events = events
   }
@@ -85,23 +94,23 @@ end
 local dfs = {
   pwr = {
     pre = {
-      IA = Setting({0,1,0,1,1},{E_SUU})
+      IA = Setting({0,1,0,1,1}, {E_CLEU, E_SUU})
     },
     gain = {
-      IA = Setting(pwrGainClr),
-      BT = Setting(pwrGainClr),
-      Me = Setting(pwrGainClr)
+      IA = Setting(pwrGainClr, {E_UA}),
+      BT = Setting(pwrGainClr, {E_UA}),
+      Me = Setting(pwrGainClr, {E_UA})
     }
   },
 
   hp = {
     pre = {
-      FoS = Setting({0,0.6,0,1}),
-      Scl = Setting({0,1,0,1}),
-      SCa = Setting({1,0,1,1})
+      FoS = Setting({0,0.6,0,1}, {E_UPF}),
+      Scl = Setting({0,1,0,1}, {E_UPF}),
+      SCa = Setting({1,0,1,1}, {E_CLEU, E_SUU})
     },
     gain = {
-      FoS = Setting({0.6,0.6,0.6,1})
+      FoS = Setting({0.6,0.6,0.6,1}, {E_UA})
     }
   },
 
@@ -127,24 +136,40 @@ local DSC = 1 -- Devour Souls scalar
 local FoST = false -- Feast of Souls talented
 -------------------------------------------------------------------------------
 
+
+------------------------ storage ----------------------------------------------
+local sections = {
+  hp = {pre = {}, gain = {}},
+  pwr = {pre = {}, gain = {}}
+}
+-------------------------------------------------------------------------------
+
+
 ------------------------ structures --------------------------------------------
 local Section = {
   parent = frame,
-  Show = Function(self) self.bar and self.bar:Show() end
-  Hide = Function(self) self.bar and self.bar:Hide() end
-  Val = Function(self) return self.calc() end
+  value = 0,
+  Show = function(self) self.bar and self.bar:Show() end,
+  Hide = function(self) self.bar and self.bar:Hide() end,
+  Disable = function(self) self.bar and self.bar:Disable(),
+  Enable = function(self) self.bar and self.bar:Enable()
 }
 
 
 function Section:New(res,type,id)
+  local s = BarsOfVengeanceUserSettings[res][type][id]
   local new = {}
+  new.res = res
+  new.type = type
   new.id = id
+  new.crit = s.crit
+  new.events = s.events
   new.spell = GetSpellInfo(id)
   new.directParent = type == pwr and pwrFrame or hpFrame
-  new.calc = dfs[res][type][id].calc
+  new.Update = dfs[res][type][id].Update
   new.bar = CreateFrame("StatusBar",nil,new.directParent)
   new.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings.sbt)
-  new.bar:SetStatusBarColor(unpack(BarsOfVengeanceUserSettings[res][type][id].clr))
+  new.bar:SetStatusBarColor(unpack(s.clr)
   self.__index = self
   return setmetatable(new, self)
 end
@@ -152,19 +177,24 @@ end
 
 
 ------------------------ utility functions ------------------------------------
+local handler
+
 local function GetAP()
   local b,p,n = UnitAttackPower(p)
   return b + p + n
 end
 
+
 local function GetCrit()
  return crit_enabled and (GetCritChance() / 100) + 1 or 1
 end
+
 
 local function GetHeal(spell,regex)
   local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(spell))):match(regex or "(%d+),(%d+)")
   return tonumber(h1..h2)
 end
+
 
 local function UpdateArtifactTraits()
   local u,e,a=UIParent,"ARTIFACT_UPDATE",C_ArtifactUI
@@ -177,7 +207,47 @@ local function UpdateArtifactTraits()
    u:RegisterEvent(e)
 end
 
+
 local function UpdateTalents
   FoST = select(2, GetTalentTierInfo(FoSL.row, FoSL.column )) == 1
+end
+
+
+local function Init()
+
+  local function GatherEventHandlers(section, storage)
+    for _, event in section.events do
+      if not storage[event] then storage.event = {} end
+      table.insert(addstorage[event], section.Update)
+    end
+  end
+
+  local function CreateEventHandler(storage)
+    local mapping = {}
+    for event, handlers in pairs(storage) do
+      mapping[event] = function(...)
+        for _,handler in pairs(handlers) do
+          handler(...)
+        end
+      end
+    end
+    return function(e,...)
+      mapping[e](...)
+    end
+  end
+
+  local eventHandlers = {}
+
+  for res, type in pairs(dfs) do
+    for id, settings in pairs(type) do
+      if BarsOfVengeanceUserSettings[res][type][id].enabled then
+        local s = Section:New(res,type,id)
+        GatherEventHandlers(s, eventHandlers)
+        sections[res][type][id] = s
+      end
+    end
+  end
+
+  frame:SetScript("OnEvent", CreateEventHandler(eventHandlers))
 end
 -------------------------------------------------------------------------------
