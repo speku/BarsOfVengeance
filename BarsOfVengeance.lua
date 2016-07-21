@@ -245,7 +245,6 @@ local Section = {
   enabled = true,
   value = 0,
   maxValue = 0,
-  tainted = nil,
   Show = function(self) if self.bar then self.bar:Show() end end,
   Hide = function(self) if self.bar then self.bar:Hide() end end,
   Disable = function(self) if self.bar then self.bar:Disable() end end,
@@ -274,7 +273,6 @@ local Section = {
 
   TriggerUpdate = function(self, attr, val)
     self[attr] = val
-    self.tainted = true
   end,
 
   Accumulate = function(self)
@@ -288,17 +286,7 @@ local Section = {
       end
     end
     return total
-  end,
-
-  OnUpdate = function(self)
-    if self.enabled and self.tainted then
-      if self.tainted == "maxValue" then
-        bar:SetMinMaxValues(0,self.maxValue)
-      else
-        bar:SetValue(self:Accumulate())
-      end
-    end
-  end,
+  end
 }
 
 
@@ -364,19 +352,19 @@ local function Init()
   local function GatherEventHandlers(section, storage)
     for _, event in pairs(section.events) do
       if not storage[event] then storage.event = {} end
-      table.insert(storage[event], {lvl = section.lvl, handler = section.Update})
+      table.insert(storage[event], {lvl = section.lvl + section.res == pwr and 10 or 0, handler = section.Update})
     end
   end
 
   local function CreateEventHandler(frame,storage)
-    table.sort(storage, function(t1,t2) return t1.lvl > t2.lvl)
     frame:UnregisterAllEvents()
     local mapping = {}
     for event, handlers in ipairs(storage) do
+      table.sort(handlers, function(h1,h2) return h1.lvl > h2.lvl)
       frame:RegisterEvent(event)
       mapping[event] = function(...)
         for _,handler in ipairs(handlers) do
-          handler(...)
+          handler.handler(...)
         end
       end
     end
