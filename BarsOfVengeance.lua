@@ -75,9 +75,7 @@ local E_UPF = "UNIT_POWER_FREQUENT"
 
 ------------------------ constants --------------------------------------------
 local FoSL = {row = 2, column = 1} -- Feast of Souls location in talent pane
-local SCaU = false -- Soul Carver Unlocked
 local DSC = 1 -- Devour Souls scalar
-local FoST = false -- Feast of Souls talented
 
 local soul_cleave_formula = function(ap) return ap * 5 end -- formula for calculating the minimal heal of Soul Cleave
 local soul_cleave_min_cost = 30 -- the minimal cost of Soul Cleave
@@ -115,6 +113,24 @@ local sections
 --------------------------------------------------------------------------------
 
 
+DispatchOnSpellAvailability = function(e,...)
+  for _,spell in pairs{"Immolation Aura", "Soul Carver"} do
+    if e == "SPELL_UPDATE_USABLE" then
+      local s = GetSpellCooldown(spell)
+      if s and s == 0 and not spellAvailability[spell].available then
+        spellAvailability[spell].available = true
+        spellAvailability[spell].continuation()
+      end
+    elseif e == "COMBAT_LOG_EVENT_UNFILTERED" then
+      if select(2,...) == "SPELL_CAST_SUCCESS" and select(4,...) == UnitGUID(p) and select(13,...) == spell then
+        spellAvailability[spell].available = false
+        spellAvailability[spell].continuation()
+      end
+    end
+  end
+end
+
+
 ------------------------------- settings ---------------------------------------
 
 -- default settings
@@ -126,29 +142,16 @@ local dfs = {
       end}
     },
     gain = {
-      IA = {lvl = 4, clr = pwrGainClr, events = {E_UA}, gain = immolation_aura_pain_gain},
-      BT = {lvl = 5, clr = pwrGainClr, events = {E_UA}, gain = blade_turning_gain},
-      Me = {lvl = 3, clr = pwrGainClr, events = {E_UA}, gain = metamorphosis_pain_gain}
-    },
-    current = {
-      powerCurrent = {lvl = 6, clr = {1,1,0,1}, events = {E_UPF}}
-    }
-    background = {
-      powerBackground = {lvl = 1, clr = {0,0,0,0.5}}
-    }
-  },
+      IA = {lvl = 4, clr = pwrGainClr, events = {E_UA}, gain = immolation_aura_pain_gain, Update = function(self)
 
-  hp = {
-    pre = {
-      FoS = {lvl = 4, clr = {0,0.6,0,1}, events = {E_UPF}},
-      Scl = {lvl = 5, clr = {0,1,0,1}, events = {E_UPF}},
-      SCa = {lvl = 3, clr = {1,0,1,1}, events = {E_CLEU, E_SUU}}
-    },
-    gain = {
-      FoS = {lvl = 6, clr = {0.6,0.6,0.6,1}, events = {E_UA}}
+      end},
+      BT = {lvl = 5, clr = pwrGainClr, events = {E_UA}, gain = blade_turning_gain, Update = function(self)
+      end},
+      Me = {lvl = 3, clr = pwrGainClr, events = {E_UA}, gain = metamorphosis_pain_gain, Update = function(self)
+      end}
     },
     current = {
-      healthCurrent = {lvl = 7, clr = {1,1,1,1}, events = {E_UHF}, Update = function(self)
+      powerCurrent = {lvl = 6, clr = {1,1,0,1}, events = {E_UPF}, Update = function(self)
         self.value = UnitHealth(p)
         local nowMax = UnitHealthMax(p)
         if nowMax ~= self.maxValue then
@@ -159,14 +162,57 @@ local dfs = {
             end
           end
         end
+      end
+    }
+    background = {
+      powerBackground = {lvl = 1, clr = {0,0,0,0.5}}
+    }
+  },
 
+  hp = {
+    pre = {
+      FoS = {lvl = 4, clr = {0,0.6,0,1}, events = {E_UPF}, healSpell = GetSpellInfo(Sh), Update = function(self)
+
+      end},
+      Scl = {lvl = 5, clr = {0,1,0,1}, events = {E_UPF}, Update = function(self)
+        local power = UnitPower(p)
+        local soulFragmentHeal = self:GetHeal() * GetSpellCount(self.spell)
+        local power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
+        local soulCleaveMinHeal = soul_cleave_formula(GetAP())
+        self.value = (soulCleaveMinHeal * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar + soulFragmentHeal) * self:GetCrit()
+      end},
+      SCa = {lvl = 3, clr = {1,0,1,1}, events = {E_CLEU, E_SUU}, Update = function(self)
+        if self.enabled then
+          self.value =
+        end
       end}
+    },
+    gain = {
+      FoS = {lvl = 6, clr = {0.6,0.6,0.6,1}, events = {E_UA}, Update = function(self)
+        self:Gain()
+      end}
+    },
+    current = {
+      healthCurrent = {lvl = 7, clr = {1,1,1,1}, events = {E_UHF}, Update = function(self)
+        self.value = UnitPower(p)
+        local nowMax = UnitPowerMax(p)
+        if nowMax ~= self.maxValue then
+          self.maxValue = nowMax
+          for type,ids in pairs(sections[self.res]) do
+            for id,_ in pairs(ids) do
+                  sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+            end
+          end
+        end
+      end
     },
     background = {
       healthBackground = {lvl = 1, clr = {0,0,0,0.5}}
     },
     absorbs = {
-      current = {lvl = 2, clr = {0,1,1,1}, events = {E_UAAC}}
+      current = {lvl = 2, clr = {0,1,1,1}, events = {E_UAAC} Update = function(self)
+        self.value = UnitGetTotalAbsorbs(p)
+      end}
     }
   },
 
@@ -207,9 +253,9 @@ local Section = {
   Untalent = function(self) self.Disable() self.Hide() self.enabled = false end,
   Talent = function(self) self.Enable() self.Show() self.enabled = true end,
 
-  Gain = function(self)
+  Gain = function(self,val)
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
-    return buffed and (expirationTime - GetTime()) / duration * gain or 0
+    self.value buffed and (expirationTime - GetTime()) / duration * (val and val or gain) or 0
   end,
 
   GetCrit = function(self)
@@ -217,7 +263,7 @@ local Section = {
   end,
 
   GetHeal = function(self)
-    local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(self.spell))):match("(%d+),(%d+)")
+    local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(self.healSpell))):match("(%d+),(%d+)")
     return tonumber(h1..h2)
   end,
 
@@ -245,7 +291,7 @@ local Section = {
   end,
 
   OnUpdate = function(self)
-    if self.tainted then
+    if self.enabled and self.tainted then
       if self.tainted == "maxValue" then
         bar:SetMinMaxValues(0,self.maxValue)
       else
@@ -268,6 +314,7 @@ function Section:New(res,type,id)
   new.events = su.events
   new.gain = sd.gain
   new.spell = GetSpellInfo(id)
+  new.healSpell = sd.healSpell or spell
   new.directParent = type == pwr and pwrFrame or hpFrame
   new.Update = sd.Update
   new.bar = CreateFrame("StatusBar",nil,new.directParent)
@@ -282,14 +329,13 @@ end
 ------------------------ utility functions ------------------------------------
 
 
-
 local function UpdateArtifactTraits()
   local u,e,a=UIParent,"ARTIFACT_UPDATE",C_ArtifactUI
    u:UnregisterEvent(e)
    SocketInventoryItem(16)
    local _,_,rank,_,bonusRank = a.GetPowerInfo(select(7,GetSpellInfo(DS)))
    DSC = 1 + (rank + bonusRank) * 0.03
-   ScaU = select(3,a.GetPowerInfo(Sca)) > 0
+   Invoke(hp,pre,SCa,select(3,a.GetPowerInfo(Sca)) > 0 and "Talent" or "Untalent")
    a.Clear()
    u:RegisterEvent(e)
 end
@@ -316,19 +362,20 @@ end
 local function Init()
 
   local function GatherEventHandlers(section, storage)
-    for _, event in section.events do
+    for _, event in pairs(section.events) do
       if not storage[event] then storage.event = {} end
-      table.insert(addstorage[event], section.Update)
+      table.insert(storage[event], {lvl = section.lvl, handler = section.Update})
     end
   end
 
   local function CreateEventHandler(frame,storage)
+    table.sort(storage, function(t1,t2) return t1.lvl > t2.lvl)
     frame:UnregisterAllEvents()
     local mapping = {}
-    for event, handlers in pairs(storage) do
+    for event, handlers in ipairs(storage) do
       frame:RegisterEvent(event)
       mapping[event] = function(...)
-        for _,handler in pairs(handlers) do
+        for _,handler in ipairs(handlers) do
           handler(...)
         end
       end
