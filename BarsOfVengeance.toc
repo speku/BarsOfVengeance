@@ -1,0 +1,7 @@
+## Interface: 60200
+## Title: BarsOfVengeance
+## Notes: Predictive health and pain bars for Vengeance Demon Hunters
+## Author: speku
+## Version: 0.1
+
+BarsOfVengeance.lua
