@@ -148,11 +148,14 @@ local sections = {
 ------------------------ structures --------------------------------------------
 local Section = {
   parent = frame,
+  enabled = true,
   value = 0,
-  Show = function(self) self.bar and self.bar:Show() end,
-  Hide = function(self) self.bar and self.bar:Hide() end,
-  Disable = function(self) self.bar and self.bar:Disable(),
-  Enable = function(self) self.bar and self.bar:Enable()
+  Show = function(self) if self.bar then self.bar:Show() end end,
+  Hide = function(self) if self.bar then self.bar:Hide() end end,
+  Disable = function(self) if self.bar then self.bar:Disable() end end,
+  Enable = function(self) if self.bar then self.bar:Enable() end end,
+  Untalent = function(self) self.Disable() self.Hide() self.enabled = false end
+  Talent = function(self) self.Enable() self.Show() self.enabled = true end
 }
 
 
@@ -177,8 +180,6 @@ end
 
 
 ------------------------ utility functions ------------------------------------
-local handler
-
 local function GetAP()
   local b,p,n = UnitAttackPower(p)
   return b + p + n
@@ -208,8 +209,21 @@ local function UpdateArtifactTraits()
 end
 
 
+local function Invoke(res,type,id,...)
+  local s = sections[res][type][id]
+  if s then
+    for _,func in pairs({...}) do
+      s[func]()
+    end
+  end
+end
+
+
 local function UpdateTalents
-  FoST = select(2, GetTalentTierInfo(FoSL.row, FoSL.column )) == 1
+  local t = select(2, GetTalentTierInfo(FoSL.row, FoSL.column )) == 1
+  local func = t and "Talent" or "Untalent"
+  Invoke(hp,gain,FoS,func)
+  Invoke(hp,pre,FoS,t,func)
 end
 
 
@@ -222,9 +236,11 @@ local function Init()
     end
   end
 
-  local function CreateEventHandler(storage)
+  local function CreateEventHandler(frame,storage)
+    frame:UnregisterAllEvents()
     local mapping = {}
     for event, handlers in pairs(storage) do
+      frame:RegisterEvent(event)
       mapping[event] = function(...)
         for _,handler in pairs(handlers) do
           handler(...)
@@ -235,6 +251,7 @@ local function Init()
       mapping[e](...)
     end
   end
+
 
   local eventHandlers = {}
 
@@ -248,6 +265,10 @@ local function Init()
     end
   end
 
-  frame:SetScript("OnEvent", CreateEventHandler(eventHandlers))
+  frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
 end
+
+
+local function
+
 -------------------------------------------------------------------------------
