@@ -110,7 +110,8 @@ local hpFrame = CreateFrame(f,nil,frame)
 
 
 ------------------------ forward declarations ----------------------------------
-local
+local dfs
+local sections
 --------------------------------------------------------------------------------
 
 
@@ -147,7 +148,19 @@ local dfs = {
       FoS = {lvl = 6, clr = {0.6,0.6,0.6,1}, events = {E_UA}}
     },
     current = {
-      healthCurrent = {lvl = 7, clr = {1,1,1,1}, events = {E_UHF}}
+      healthCurrent = {lvl = 7, clr = {1,1,1,1}, events = {E_UHF}, Update = function(self)
+        self.value = UnitHealth(p)
+        local nowMax = UnitHealthMax(p)
+        if nowMax ~= self.maxValue then
+          self.maxValue = nowMax
+          for type,ids in pairs(sections[self.res]) do
+            for id,_ in pairs(ids) do
+                  sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+            end
+          end
+        end
+
+      end}
     },
     background = {
       healthBackground = {lvl = 1, clr = {0,0,0,0.5}}
@@ -185,33 +198,61 @@ local Section = {
   parent = frame,
   enabled = true,
   value = 0,
-  _maxValue = 0,
+  maxValue = 0,
+  tainted = nil,
   Show = function(self) if self.bar then self.bar:Show() end end,
   Hide = function(self) if self.bar then self.bar:Hide() end end,
   Disable = function(self) if self.bar then self.bar:Disable() end end,
   Enable = function(self) if self.bar then self.bar:Enable() end end,
   Untalent = function(self) self.Disable() self.Hide() self.enabled = false end,
   Talent = function(self) self.Enable() self.Show() self.enabled = true end,
+
   Gain = function(self)
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
     return buffed and (expirationTime - GetTime()) / duration * gain or 0
   end,
+
   GetCrit = function(self)
    return self.crit and (GetCritChance() / 100) + 1 or 1
   end,
+
   GetHeal = function(self)
     local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(self.spell))):match("(%d+),(%d+)")
     return tonumber(h1..h2)
   end,
+
   GetAP = function()
     local b,p,n = UnitAttackPower(p)
     return b + p + n
   end,
 
+  TriggerUpdate = function(self, attr, val)
+    self[attr] = val
+    self.tainted = true
+  end,
 
-  Prediction = function(self)
+  Accumulate = function(self)
+    local total = 0
+    for type, ids in pairs(dfs[self.res]) do
+      for id,_ in pairs(ids) do
+        local s = dfs[self.res][type][id]
+        if s.lvl <= self.lvl then
+          total = total + s.value
+        end
+      end
+    end
+    return total
+  end,
 
-  end
+  OnUpdate = function(self)
+    if self.tainted then
+      if self.tainted == "maxValue" then
+        bar:SetMinMaxValues(0,self.maxValue)
+      else
+        bar:SetValue(self:Accumulate())
+      end
+    end
+  end,
 }
 
 
@@ -220,7 +261,6 @@ function Section:New(res,type,id)
   local su = BarsOfVengeanceUserSettings[res][type][id]
   local sd = dfs[res][type][id]
   local new = {}
-  new.maxValue = function() return sd.maxValueRef.maxValue 
   new.res = res
   new.type = type
   new.id = id
