@@ -57,6 +57,8 @@ local hpXOffset = "hpXOffset"
 local hpYOffset = "hpYOffset"
 local pwrXOffset = "pwrXOffset"
 local pwrYOffset = "pwrYOffset"
+local background = "background"
+local center = "CENTER"
 --------------------------------------------------------------------------------
 
 
@@ -110,26 +112,24 @@ local hpFrame = CreateFrame(f,nil,frame)
 ------------------------ forward declarations ----------------------------------
 local dfs
 local sections
+
+
 --------------------------------------------------------------------------------
 
-
-DispatchOnSpellAvailability = function(e,...)
-  for _,spell in pairs{"Immolation Aura", "Soul Carver"} do
-    if e == "SPELL_UPDATE_USABLE" then
+local function UpdateAvailability(self,func,e,...)
+    if e == E_SUU then
       local s = GetSpellCooldown(spell)
-      if s and s == 0 and not spellAvailability[spell].available then
-        spellAvailability[spell].available = true
-        spellAvailability[spell].continuation()
+      if s and s == 0 and not self.available then
+        self.available = true
+        func()
       end
-    elseif e == "COMBAT_LOG_EVENT_UNFILTERED" then
-      if select(2,...) == "SPELL_CAST_SUCCESS" and select(4,...) == UnitGUID(p) and select(13,...) == spell then
-        spellAvailability[spell].available = false
-        spellAvailability[spell].continuation()
+    elseif e == E_CLEU then
+      if select(2,...) == "SPELL_CAST_SUCCESS" and select(4,...) == UnitGUID(p) and select(13,...) == self.spell then
+        self.available = false
+        func()
       end
     end
-  end
 end
-
 
 ------------------------------- settings ---------------------------------------
 
@@ -137,8 +137,8 @@ end
 local dfs = {
   pwr = {
     pre = {
-      IA = {lvl = 2, clr = {0,1,0,1,1}, events = {E_CLEU, E_SUU}, gain = immolation_aura_pain_gain, Update = function(self)
-
+      IA = {lvl = 2, clr = {0,1,0,1,1}, events = {E_CLEU, E_SUU}, gain = immolation_aura_pain_gain, Update = function(self,e,...)
+        UpdateSpellAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
       end}
     },
     gain = {
@@ -165,26 +165,23 @@ local dfs = {
       end
     }
     background = {
-      powerBackground = {lvl = 1, clr = {0,0,0,0.5}}
-    }
+      powerBackground = {lvl = 1, clr = {0,0,0,0.5}, w = 200, h = 20, x = 0, y = -50, sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", lrIA = 1, clrID = 0.6},
+    },
   },
 
   hp = {
     pre = {
-      FoS = {lvl = 4, clr = {0,0.6,0,1}, events = {E_UPF}, healSpell = GetSpellInfo(Sh), Update = function(self)
+      FoS = {lvl = 4, clr = {0,0.6,0,1}, events = {E_UPF}, Update = function(self)
 
       end},
-      Scl = {lvl = 5, clr = {0,1,0,1}, events = {E_UPF}, Update = function(self)
+      Scl = {lvl = 5, clr = {0,1,0,1}, events = {E_UPF}, healSpell = GetSpellInfo(Sh), healMulti = function(self) GetSpellCount(self.spell) end, Update = function(self)
         local power = UnitPower(p)
-        local soulFragmentHeal = self:GetHeal() * GetSpellCount(self.spell)
         local power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
         local soulCleaveMinHeal = soul_cleave_formula(GetAP())
-        self.value = (soulCleaveMinHeal * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar + soulFragmentHeal) * self:GetCrit()
+        self.value = (soulCleaveMinHeal * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar + self:GetHeal()) * self:GetCrit()
       end},
-      SCa = {lvl = 3, clr = {1,0,1,1}, events = {E_CLEU, E_SUU}, Update = function(self)
-        if self.enabled then
-          self.value =
-        end
+      SCa = {lvl = 3, clr = {1,0,1,1}, events = {E_CLEU, E_SUU}, healSpell = GetSpellInfo(Sh), healMulti = function() return soul_carver_soul_fragment_count end, Update = function(self,e,...)
+        UpdateSpellAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
       end}
     },
     gain = {
@@ -207,22 +204,14 @@ local dfs = {
       end
     },
     background = {
-      healthBackground = {lvl = 1, clr = {0,0,0,0.5}}
+      healthBackground = {lvl = 1, clr = {0,0,0,0.5}, w = 200, h = 20, x = 0, y = -50, sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", lrIA = 1, clrID = 0.6},
     },
     absorbs = {
       current = {lvl = 2, clr = {0,1,1,1}, events = {E_UAAC} Update = function(self)
         self.value = UnitGetTotalAbsorbs(p)
       end}
-    }
+    },
   },
-
-  sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
-  w = 200,
-  h = 20,
-  x = 0,
-  y = -50,
-  clrIA = 1,
-  clrID = 0.6,
 
 }
 
@@ -245,6 +234,7 @@ local Section = {
   enabled = true,
   value = 0,
   maxValue = 0,
+  available = false,
   Show = function(self) if self.bar then self.bar:Show() end end,
   Hide = function(self) if self.bar then self.bar:Hide() end end,
   Disable = function(self) if self.bar then self.bar:Disable() end end,
@@ -263,7 +253,7 @@ local Section = {
 
   GetHeal = function(self)
     local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(self.healSpell))):match("(%d+),(%d+)")
-    return tonumber(h1..h2)
+    return tonumber(h1..h2) * self.healMulti()
   end,
 
   GetAP = function()
@@ -286,13 +276,19 @@ local Section = {
       end
     end
     return total
+  end,
+
+  Move = function(self)
+
   end
-}
+},
+
 
 
 
 function Section:New(res,type,id)
-  local su = BarsOfVengeanceUserSettings[res][type][id]
+  local surt = BarsOfVengeanceUserSettings[res][type]
+  local su = surt[id]
   local sd = dfs[res][type][id]
   local new = {}
   new.res = res
@@ -303,11 +299,14 @@ function Section:New(res,type,id)
   new.gain = sd.gain
   new.spell = GetSpellInfo(id)
   new.healSpell = sd.healSpell or spell
+  new.healMulti = sd.healMulti or function() return 1 end
   new.directParent = type == pwr and pwrFrame or hpFrame
   new.Update = sd.Update
   new.bar = CreateFrame("StatusBar",nil,new.directParent)
-  new.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings.sbt)
-  new.bar:SetStatusBarColor(unpack(su.clr)
+  new.bar:SetStatusBarTexture(surt.background.sbt)
+  new.bar:SetStatusBarColor(unpack(su.clr))
+  new.Bar:SetPoint("TOPLEFT")
+  new.Bar:SetPoint("BOTTOMRIGHT")
   self.__index = self
   return setmetatable(new, self)
 end
@@ -347,7 +346,31 @@ local function UpdateTalents
 end
 
 
+local function SetupFrames()
+  local pwrs = BarsOfVengeanceUserSettings[pwr].background.powerBackground
+  local hps = BarsOfVengeanceUserSettings[hp].background.powerBackground
+
+  frame:SetPoint(center)
+
+  pwrFrame:SetWidth(pwrs.w)
+  pwrFrame:SetHeight(pwrs.h)
+  pwrFrame:SetPoint(center, center, pwrs.x, pwrs.y)
+
+  hpFrame:SetPoint(center, center, hps.x, hps.y
+  hpFrame:SetWidth(hps.w)
+  hpFrame:SetHeight(hps.h)
+end
+
+
 local function Init()
+
+  local function HookPostUpdate(self)
+    local u = self.Update
+    self.Update = function(self)
+      u(self)
+      self.bar.SetValue(self:Accumulate())
+    end
+  end
 
   local function GatherEventHandlers(section, storage)
     for _, event in pairs(section.events) do
@@ -380,6 +403,7 @@ local function Init()
     for id, settings in pairs(type) do
       if BarsOfVengeanceUserSettings[res][type][id].enabled then
         local s = Section:New(res,type,id)
+        s:HookPostUpdate()
         GatherEventHandlers(s, eventHandlers)
         sections[res][type][id] = s
       end
