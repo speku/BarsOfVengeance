@@ -196,10 +196,10 @@ dfs = {
         enabled = true,
         lvl = 3,
         clr = pwrGainClr,
-        events = {E_UA},
+        events = {E_UA, E_CLEU, E_SUU},
         gain = metamorphosis_pain_gain,
-        Update = function(self)
-          self:Gain(self.available and self.gain or fueled_by_pain_gain)
+        Update = function(self,e,...)
+          UpdateAvailability(self,function() self:Gain(self.available and self.gain or fueled_by_pain_gain) end,e,...)
         end
       }
     },
@@ -455,7 +455,7 @@ function Section:New(res,type,id) -- constructor for new sections
   n.gain = sd.gain -- total resource gain of related spell
   n.spell = GetSpellInfo(id) -- localized name of the spell
   n.healSpell = sd.healSpell and sd.healSpell or n.id -- whether or not heals should be predicted according to different spells than the normal one
-  n.directParent = type == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
+  n.directParent = res == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
   n.Update = sd.Update -- updates the underlying value
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
@@ -527,9 +527,9 @@ local function SetupFrames()
 
   pwrFrame:SetWidth(pwrs.w)
   pwrFrame:SetHeight(pwrs.h)
-  pwrFrame:SetPoint(center, frame, center, 100, -500)
+  pwrFrame:SetPoint(center, frame, center, pwrs.x, pwrs.y)
 
-  hpFrame:SetPoint(center, frame, center, 20, -100)
+  hpFrame:SetPoint(center, frame, center, hps.x, hps.y)
   hpFrame:SetWidth(hps.w)
   hpFrame:SetHeight(hps.h)
 
@@ -609,6 +609,7 @@ local function Init()
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
 end
 
-Init()
 SetupFrames()
+Init()
+
 -------------------------------------------------------------------------------
