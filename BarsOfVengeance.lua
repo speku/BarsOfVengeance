@@ -77,8 +77,7 @@ local E_UPF = "UNIT_POWER_FREQUENT"
 
 ------------------------ constants --------------------------------------------
 local FoSL = {row = 2, column = 1} -- Feast of Souls location in talent pane
-local DSC = 1 -- Devour Souls scalar
-
+local devour_souls_scalar = 1 -- Devour Souls scalar
 local soul_cleave_formula = function(ap) return ap * 5 end -- formula for calculating the minimal heal of Soul Cleave
 local soul_cleave_min_cost = 30 -- the minimal cost of Soul Cleave
 local soul_cleave_max_cost = 60 -- the maximal cost of Soul Cleave
@@ -113,7 +112,6 @@ local hpFrame = CreateFrame(f,nil,frame) -- health frame
 local dfs
 local sections
 
-
 --------------------------------------------------------------------------------
 
 -- keeps track of spell availability and calls its function parameter upon
@@ -133,10 +131,21 @@ local function UpdateAvailability(self,func,e,...)
     end
 end
 
+
+local function IterateTable(table, func)
+    for res, resTable in pairs(table) do
+      for type, typeTable in pairs(resTable) do
+        for id, idTable in pairs(typeTable) do
+          func(res,type,id)
+        end
+      end
+    end
+end
+
 ------------------------------- settings ---------------------------------------
 
 -- default settings
-local dfs = {
+dfs = {
   [pwr] = { -- settings relating to power "sections" of your bars
 
     [pre] = { -- power prediction
@@ -197,11 +206,9 @@ local dfs = {
           local nowMax = UnitPowerMax(p)
           if nowMax ~= self.maxValue then
             self.maxValue = nowMax
-            for type,ids in pairs(sections[self.res]) do
-              for id,_ in pairs(ids) do
-                    sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
-              end
-            end
+            IterateTable(sections, function(res,type,id)
+              sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+            end)
           end
         end
     }
@@ -232,7 +239,12 @@ local dfs = {
         clr = {0,0.6,0,1},
         events = {E_UPF},
         Update = function(self)
-
+          local power = sections[pwr].current.power.value
+          if power >= soul_cleave_min_cost then
+            self:GetHeal()
+          else
+            self.value = 0
+          end
         end},
 
       [SCl] = { -- Soul Cleave
@@ -240,7 +252,7 @@ local dfs = {
         lvl = 5,
         clr = {0,1,0,1},
         events = {E_UPF},
-        healSpell = GetSpellInfo(Sh),
+        healSpell = Sh,
         Update = function(self)
           local power = sections[pwr].current.power.value
           if power >= soul_cleave_min_cost then
@@ -248,7 +260,7 @@ local dfs = {
             self:GetHeal(
               GetSpellCount(self.healSpell),
               function()
-                return soul_cleave_formula(GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar
+                return soul_cleave_formula(self:GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar
               end)
           else
             self.value = 0
@@ -277,10 +289,11 @@ local dfs = {
       [FoS] = { -- Feast of Souls
         enabled = true,
         lvl = 6,
+        crit = false,
         clr = {0.6,0.6,0.6,1},
         events = {E_UA},
         Update = function(self)
-          self:Gain()
+          self:Gain(self:GetHeal(nil,nil,true))
         end}
     },
 
@@ -292,17 +305,15 @@ local dfs = {
         clr = {1,1,1,1},
         events = {E_UHF},
         Update = function(self)
-            self.value = UnitHealth(p)
-            local nowMax = UnitHealthMax(p)
-            if nowMax ~= self.maxValue then
-              self.maxValue = nowMax
-              for type,ids in pairs(sections[self.res]) do
-                for id,_ in pairs(ids) do
-                      sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
-                end
-              end
-            end
+          self.value = UnitHealth(p)
+          local nowMax = UnitHealthMax(p)
+          if nowMax ~= self.maxValue then
+            self.maxValue = nowMax
+            IterateTable(sections, function(res,type,id)
+              sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+            end)
           end
+        end
         }
     },
 
@@ -343,7 +354,7 @@ BarsOfVengeanceUserSettings = setmetatable({},{__index = dfs}) -- only a few set
 ------------------------ storage ----------------------------------------------
 
 -- all currently instantiated sections
-local sections = {
+sections = {
   [hp] = {[pre] = {}, [gain] = {}, current = {}, absorbs = {}, background = {}},
   [pwr] = {[pre] = {}, [gain] = {}, current = {}, background = {}},
 }
@@ -360,6 +371,7 @@ local Section = {
   value = 0, -- the current value of the section (e.g. for how much your next Soul Cleave would heal you)
   maxValue = 0, -- the max value of the section (usually represents the masimum amount of power / health the player can have)
   available = false, -- if the underlying spell (Soul Carver / Immolation Aura) is available
+  crit = true,
   Show = function(self) if self.bar then self.bar:Show() end end,
   Hide = function(self) if self.bar then self.bar:Hide() end end,
   Disable = function(self) if self.bar then self.bar:Disable() end end,
@@ -367,7 +379,7 @@ local Section = {
   Untalent = function(self) self.Disable() self.Hide() self.enabled = false end,
   Talent = function(self) self.Enable() self.Show() self.enabled = true end,
 
-  Gain = function(self,val) -- used for guaranteed buff gains
+  Gain = function(self,val) -- used for guaranteed buff gainsw
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
     self.value = buffed and (expirationTime - GetTime()) / duration * (val and val or self.gain) or 0
   end,
@@ -376,9 +388,14 @@ local Section = {
    return self.crit and (GetCritChance() / 100) + 1 or 1
   end,
 
-  GetHeal = function(self, baseMulti, additiveHeal) -- resulting heal of next spell cast (prediction)
-    local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(self.healSpell))):match("(%d+),(%d+)")
-    self.value = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or 1)) * self:GetCrit()
+  GetHeal = function(self, baseMulti, additiveHeal, forGain) -- resulting heal of next spell cast (prediction)
+    local h1,h2 = GetSpellDescription(self.healSpell):match("(%d+),(%d+)")
+    local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or 1)) * self:GetCrit()
+    if forGain then
+      return res
+    else
+      self.value = res
+    end
   end,
 
   GetAP = function() -- attack power
@@ -421,7 +438,7 @@ function Section:New(res,type,id) -- constructor for new sections
   new.events = su.events -- events that trigger changes in the section's value
   new.gain = sd.gain -- total resource gain of related spell
   new.spell = GetSpellInfo(id) -- localized name of the spell
-  new.healSpell = sd.healSpell or new.spell -- whether or not heals should be predicted according to different spells than the normal one
+  new.healSpell = sd.healSpell and sd.healSpell or new.id -- whether or not heals should be predicted according to different spells than the normal one
   new.directParent = type == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
   new.Update = sd.Update -- updates the underlying value
   new.bar = CreateFrame("StatusBar",nil,new.directParent) -- the related status bar
@@ -451,7 +468,7 @@ local function UpdateArtifactTraits()
    u:UnregisterEvent(e)
    SocketInventoryItem(16)
    local _,_,rank,_,bonusRank = a.GetPowerInfo(select(7,GetSpellInfo(DS)))
-   DSC = 1 + (rank + bonusRank) * 0.03
+   devour_souls_scalar = 1 + (rank + bonusRank) * 0.03
    Invoke(hp,pre,SCa,select(3,a.GetPowerInfo(Sca)) > 0 and "Talent" or "Untalent")
    a.Clear()
    u:RegisterEvent(e)
@@ -503,8 +520,8 @@ local function Init()
   -- this function hooks onto the section's update function to achieve just this.
   local function HookPostUpdate(section)
     local u = section.Update
-    section.Update = function(section)
-      u(section)
+    section.Update = function(section,...)
+      u(section,...)
       section.bar:SetValue(section:Accumulate())
     end
   end
