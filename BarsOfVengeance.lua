@@ -119,7 +119,7 @@ local sections
 -- availability change
 local function UpdateAvailability(self,func,e,...)
     if e == E_SUU then
-      local s = GetSpellCooldown(spell)
+      local s = GetSpellCooldown(self.spell)
       if s and s == 0 and not self.available then
         self.available = true
         func()
@@ -150,6 +150,7 @@ local function UpdateResource(self,isPower)
 
 -- default settings
 dfs = {
+
   [pwr] = { -- settings relating to power "sections" of your bars
 
     [pre] = { -- power prediction
@@ -162,8 +163,10 @@ dfs = {
         gain = immolation_aura_pain_gain, -- how much pain is gained over the total duration of Immolation Aura
         Update = function(self,e,...) -- function to be triggered upon relevant events -> causes a change in the related sections' value
           UpdateAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
-        end}
+        end
+      }
     },
+
     [gain] = { -- definitive power gains of active buffs
 
       [IA] = { -- Immolation Aura
@@ -175,7 +178,8 @@ dfs = {
         gain = immolation_aura_pain_gain,
         Update = function(self)
           self:Gain()
-        end},
+        end
+      },
 
       [BT] = { -- Blade Turning
         enabled = true,
@@ -185,7 +189,8 @@ dfs = {
         gain = blade_turning_gain,
         Update = function(self)
           self:Gain()
-        end},
+        end
+      },
 
       [Me] = { -- Metamorphosis
         enabled = true,
@@ -195,7 +200,8 @@ dfs = {
         gain = metamorphosis_pain_gain,
         Update = function(self)
           self:Gain(self.available and self.gain or fueled_by_pain_gain)
-        end}
+        end
+      }
     },
 
     current = { -- current power level
@@ -222,7 +228,8 @@ dfs = {
         y = -150, -- equivalent y-offset
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", -- status bar texture used for power bars
         lrIA = 1, -- color saturation of bars of which the underlying spell is meant to be used
-        clrID = 0.6}, -- color saturation of bars of which the underlying spell should not be used
+        clrID = 0.6 -- color saturation of bars of which the underlying spell should not be used
+      },
     },
   },
 
@@ -242,7 +249,8 @@ dfs = {
           else
             self.value = 0
           end
-        end},
+        end
+      },
 
       [SCl] = { -- Soul Cleave
         enabled = true,
@@ -262,12 +270,15 @@ dfs = {
           else
             self.value = 0
           end
-        end},
+        end,
+
+      },
 
       [SCa] = { -- Soul Carver
         enabled = true,
         lvl = 3,
         clr = {1,0,1,1},
+        crit = false,
         events = {E_CLEU, E_SUU},
         healSpell = GetSpellInfo(Sh),
         Update = function(self,e,...)
@@ -278,7 +289,8 @@ dfs = {
               self.value = 0
             end
           end,e,...)
-        end}
+        end
+      }
     },
 
     [gain] = { -- definitive health gains of active buffs
@@ -291,7 +303,8 @@ dfs = {
         events = {E_UA},
         Update = function(self)
           self:Gain(self:GetHeal(nil,nil,true))
-        end}
+        end
+      }
     },
 
     current = { -- current health
@@ -304,7 +317,7 @@ dfs = {
         Update = function(self)
           UpdateResource(self, false)
         end
-        }
+      }
     },
 
     background = {
@@ -319,7 +332,8 @@ dfs = {
         y = -100,
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
         lrIA = 1,
-        clrID = 0.6},
+        clrID = 0.6
+      },
     },
 
     absorbs = { -- absorbs
@@ -331,7 +345,8 @@ dfs = {
         events = {E_UAAC},
         Update = function(self)
           self.value = UnitGetTotalAbsorbs(p)
-        end}
+        end
+      }
     },
   }
 }
@@ -430,34 +445,36 @@ local Section = {
 function Section:New(res,type,id) -- constructor for new sections
   local su = BarsOfVengeanceUserSettings[res][type][id]
   local sd = dfs[res][type][id]
-  local new = setmetatable({}, self)
-  new.res = res -- related resource type (health/power)
-  new.lvl = su.lvl
-  new.type = type -- prediction or gain display
-  new.id = id -- spell id
-  new.crit = su.crit -- crit enabled /disabled
-  new.events = su.events -- events that trigger changes in the section's value
-  new.gain = sd.gain -- total resource gain of related spell
-  new.spell = GetSpellInfo(id) -- localized name of the spell
-  new.healSpell = sd.healSpell and sd.healSpell or new.id -- whether or not heals should be predicted according to different spells than the normal one
-  new.directParent = type == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
-  new.Update = sd.Update -- updates the underlying value
-  new.bar = CreateFrame("StatusBar",nil,new.directParent) -- the related status bar
-  new.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
-  new.bar:SetStatusBarColor(unpack(su.clr))
-  -- new.bar:SetBackdropColor(0,0,0,0)
-  new.bar:SetPoint("TOPLEFT")
-  new.bar:SetPoint("BOTTOMRIGHT")
-  new.bar:SetFrameStrata(lvlToStrata[new.lvl])
-  new.bar:SetMinMaxValues(0,maxValue)
+  local n = setmetatable({}, self)
+  n.res = res -- related resource type (health/power)
+  n.lvl = su.lvl
+  n.type = type -- prediction or gain display
+  n.id = id -- spell id
+  n.crit = su.crit -- crit enabled /disabled
+  n.events = su.events -- events that trigger changes in the section's value
+  n.gain = sd.gain -- total resource gain of related spell
+  n.spell = GetSpellInfo(id) -- localized name of the spell
+  n.healSpell = sd.healSpell and sd.healSpell or n.id -- whether or not heals should be predicted according to different spells than the normal one
+  n.directParent = type == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
+  n.Update = sd.Update -- updates the underlying value
+  n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
+  n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
+  n.bar:SetStatusBarColor(unpack(su.clr))
+  n.bar:SetPoint("TOPLEFT")
+  n.bar:SetPoint("BOTTOMRIGHT")
+  n.bar:SetFrameStrata(lvlToStrata[n.lvl])
+  n.bar:SetMinMaxValues(0,maxValue)
   if id == background then
-    new.bar:SetValue(maxValue)
+    n.bar:SetValue(maxValue)
   else
-    new.actualMaxValue = res == hp and (UnitHealthMax(p) or UnitPowerMax(p)) or 1
-    new.bar:SetValue((res == hp and UnitHealth(p) or UnitPower(p)) / new.actualMaxValue * maxValue)
+    n.actualMaxValue = res == hp and UnitHealthMax(p) or UnitPowerMax(p)
+    if n.actualMaxValue == 0 then
+      n.actualMaxValue = 1
+    end
+    n.bar:SetValue((res == hp and UnitHealth(p) or UnitPower(p)) / n.actualMaxValue * maxValue)
   end
   self.__index = self
-  return new
+  return n
 end
 -------------------------------------------------------------------------------
 
@@ -570,7 +587,7 @@ local function Init()
     frame:RegisterEvent(E_PTU)
 
     return function(f,e,...)
-      mapping[e](...)
+      mapping[e](e,...)
     end
   end
 
