@@ -137,22 +137,24 @@ end
 
 -- default settings
 local dfs = {
-  pwr = { -- settings relating to power "sections" of your bars
+  [pwr] = { -- settings relating to power "sections" of your bars
 
-    pre = { -- power prediction
+    [pre] = { -- power prediction
 
-      IA = { -- Immolation Aura
+      [IA] = { -- Immolation Aura
+        enabled = true,
         lvl = 2, -- strata
         clr = {0,1,0,1,1}, -- color
         events = {E_CLEU, E_SUU}, -- events that cause the related value/bar to change
         gain = immolation_aura_pain_gain, -- how much pain is gained over the total duration of Immolation Aura
         Update = function(self,e,...) -- function to be triggered upon relevant events -> causes a change in the related sections' value
-          UpdateSpellAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
+          UpdateAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
         end}
     },
-    gain = { -- definitive power gains of active buffs
+    [gain] = { -- definitive power gains of active buffs
 
-      IA = { -- Immolation Aura
+      [IA] = { -- Immolation Aura
+        enabled = true,
         lvl = 4,
         clr =
         pwrGainClr,
@@ -162,7 +164,8 @@ local dfs = {
           self:Gain()
         end},
 
-      BT = { -- Blade Turning
+      [BT] = { -- Blade Turning
+        enabled = true,
         lvl = 5,
         clr = pwrGainClr,
         events = {E_UA},
@@ -171,7 +174,8 @@ local dfs = {
           self:Gain()
         end},
 
-      Me = { -- Metamorphosis
+      [Me] = { -- Metamorphosis
+        enabled = true,
         lvl = 3,
         clr = pwrGainClr,
         events = {E_UA},
@@ -183,7 +187,8 @@ local dfs = {
 
     current = { -- current power level
 
-      powerCurrent = {
+      power = {
+        enabled = true,
         lvl = 6,
         clr = {1,1,0,1},
         events = {E_UPF},
@@ -203,7 +208,8 @@ local dfs = {
   },
 
     background = { -- background bar
-      powerBackground = {
+      background = {
+        enabled = true,
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200, -- width of power bars
@@ -216,11 +222,12 @@ local dfs = {
     },
   },
 
-  hp = { -- health related settings
+  [hp] = { -- health related settings
 
-    pre = { -- prediction
+    [pre] = { -- prediction
 
-      FoS = { -- Feast of Souls
+      [FoS] = { -- Feast of Souls
+        enabled = true,
         lvl = 4,
         clr = {0,0.6,0,1},
         events = {E_UPF},
@@ -228,13 +235,14 @@ local dfs = {
 
         end},
 
-      Scl = { -- Soul Cleave
+      [SCl] = { -- Soul Cleave
+        enabled = true,
         lvl = 5,
         clr = {0,1,0,1},
         events = {E_UPF},
         healSpell = GetSpellInfo(Sh),
         Update = function(self)
-          local power = sections[pwr].current.powerCurrent.value
+          local power = sections[pwr].current.power.value
           if power >= soul_cleave_min_cost then
             power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
             self:GetHeal(
@@ -247,13 +255,14 @@ local dfs = {
           end
         end},
 
-      SCa = { -- Soul Carver
+      [SCa] = { -- Soul Carver
+        enabled = true,
         lvl = 3,
         clr = {1,0,1,1},
         events = {E_CLEU, E_SUU},
         healSpell = GetSpellInfo(Sh),
         Update = function(self,e,...)
-          UpdateSpellAvailability(self, function()
+          UpdateAvailability(self, function()
             if self.available then
               self:GetHeal(soul_carver_soul_fragment_count)
             else
@@ -263,9 +272,10 @@ local dfs = {
         end}
     },
 
-    gain = { -- definitive health gains of active buffs
+    [gain] = { -- definitive health gains of active buffs
 
-      FoS = { -- Feast of Souls
+      [FoS] = { -- Feast of Souls
+        enabled = true,
         lvl = 6,
         clr = {0.6,0.6,0.6,1},
         events = {E_UA},
@@ -276,7 +286,8 @@ local dfs = {
 
     current = { -- current health
 
-      healthCurrent = {
+      health = {
+        enabled = true,
         lvl = 7,
         clr = {1,1,1,1},
         events = {E_UHF},
@@ -297,7 +308,8 @@ local dfs = {
 
     background = {
 
-      healthBackground = {
+      background = {
+        enabled = true,
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200,
@@ -312,6 +324,7 @@ local dfs = {
     absorbs = { -- absorbs
 
       current = {
+        enabled = true,
         lvl = 2,
         clr = {0,1,1,1},
         events = {E_UAAC},
@@ -322,8 +335,7 @@ local dfs = {
   }
 }
 
-dfs.__index = dfs
-BarsOfVengeanceUserSettings = setmetatable({},dfs) -- only a few settings
+BarsOfVengeanceUserSettings = setmetatable({},{__index = dfs}) -- only a few settings
 -- should be changable by the user, so must stuff is accessed via the meta table
 -------------------------------------------------------------------------------
 
@@ -332,8 +344,8 @@ BarsOfVengeanceUserSettings = setmetatable({},dfs) -- only a few settings
 
 -- all currently instantiated sections
 local sections = {
-  hp = {pre = {}, gain = {}},
-  pwr = {pre = {}, gain = {}}
+  [hp] = {[pre] = {}, [gain] = {}, current = {}, absorbs = {}, background = {}},
+  [pwr] = {[pre] = {}, [gain] = {}, current = {}, background = {}},
 }
 -------------------------------------------------------------------------------
 
@@ -357,7 +369,7 @@ local Section = {
 
   Gain = function(self,val) -- used for guaranteed buff gains
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
-    self.value = buffed and (expirationTime - GetTime()) / duration * (val and val or gain) or 0
+    self.value = buffed and (expirationTime - GetTime()) / duration * (val and val or self.gain) or 0
   end,
 
   GetCrit = function(self) -- whether or not crit should be factored in when calculating gains / predictions
@@ -383,7 +395,7 @@ local Section = {
     local total = 0
     for type, ids in pairs(dfs[self.res]) do
       for id,_ in pairs(ids) do
-        local s = dfs[self.res][type][id]
+        local s = sections[self.res][type][id]
         if s.lvl <= self.lvl then
           total = total + s.value
         end
@@ -398,11 +410,11 @@ local Section = {
 }
 
 function Section:New(res,type,id) -- constructor for new sections
-  local surt = BarsOfVengeanceUserSettings[res][type] -- shortcuts
-  local su = surt[id]
+  local su = BarsOfVengeanceUserSettings[res][type][id]
   local sd = dfs[res][type][id]
   local new = {}
   new.res = res -- related resource type (health/power)
+  new.lvl = su.lvl
   new.type = type -- prediction or gain display
   new.id = id -- spell id
   new.crit = su.crit -- crit enabled /disabled
@@ -413,10 +425,17 @@ function Section:New(res,type,id) -- constructor for new sections
   new.directParent = type == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
   new.Update = sd.Update -- updates the underlying value
   new.bar = CreateFrame("StatusBar",nil,new.directParent) -- the related status bar
-  new.bar:SetStatusBarTexture(surt.background.sbt)
+  new.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   new.bar:SetStatusBarColor(unpack(su.clr))
-  new.Bar:SetPoint("TOPLEFT")
-  new.Bar:SetPoint("BOTTOMRIGHT")
+  new.bar:SetPoint("TOPLEFT")
+  new.bar:SetPoint("BOTTOMRIGHT")
+  local min, max
+  if res == pwr then
+    min,max = UnitPower(p),UnitPowerMax(p)
+  else
+    min,max = UnitHealth(p),UnitHealthMax(p)
+  end
+  new.bar:SetMinMaxValues(min,max)
   self.__index = self
   return setmetatable(new, self)
 end
@@ -475,7 +494,6 @@ local function SetupFrames()
   hpFrame:SetHeight(hps.h)
 end
 
-
 -- initializes all sections and build a customized event listener
 local function Init()
 
@@ -483,19 +501,21 @@ local function Init()
   -- the value that should be displayed on the related status bar has to be
   -- accumulated and the statusbar needs to be accordingly set.
   -- this function hooks onto the section's update function to achieve just this.
-  local function HookPostUpdate(self)
-    local u = self.Update
-    self.Update = function(self)
-      u(self)
-      self.bar.SetValue(self:Accumulate())
+  local function HookPostUpdate(section)
+    local u = section.Update
+    section.Update = function(section)
+      u(section)
+      section.bar:SetValue(section:Accumulate())
     end
   end
 
   -- Creates a mapping of events and according handlers of a section
   local function GatherEventHandlers(section, storage)
-    for _, event in pairs(section.events) do
-      if not storage[event] then storage.event = {} end
-      table.insert(storage[event], {lvl = section.lvl + section.res == pwr and 10 or 0, section = section})
+    if section.events then
+      for _, event in pairs(section.events) do
+        if not storage[event] then storage[event] = {} end
+        table.insert(storage[event], {lvl = section.lvl + (section.res == pwr and 10 or 0), section = section})
+      end
     end
   end
 
@@ -503,7 +523,7 @@ local function Init()
   local function CreateEventHandler(frame,storage)
     frame:UnregisterAllEvents()
     local mapping = {}
-    for event, handlers in ipairs(storage) do
+    for event, handlers in pairs(storage) do
       table.sort(handlers, function(h1,h2) return h1.lvl > h2.lvl end)
       frame:RegisterEvent(event)
       mapping[event] = function(...)
@@ -518,7 +538,7 @@ local function Init()
     mapping[E_SC] = UpdateArtifactTraits
     mapping[E_PTU] = UpdateTalents
 
-    return function(e,...)
+    return function(f,e,...)
       mapping[e](...)
     end
   end
@@ -526,17 +546,18 @@ local function Init()
 
   local eventHandlers = {}
 
-  for res, type in pairs(dfs) do
-    for id, settings in pairs(type) do
-      if BarsOfVengeanceUserSettings[res][type][id].enabled then
-        local s = Section:New(res,type,id)
-        s:HookPostUpdate()
-        GatherEventHandlers(s, eventHandlers)
-        sections[res][type][id] = s
+  for res, resTable in pairs(dfs) do
+    for type, typeTable in pairs(resTable) do
+      for id, idTable in pairs(typeTable) do
+        if BarsOfVengeanceUserSettings[res][type][id].enabled then
+          local s = Section:New(res,type,id)
+          HookPostUpdate(s)
+          GatherEventHandlers(s, eventHandlers)
+          sections[res][type][id] = s
+        end
       end
     end
   end
-
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
 end
 
