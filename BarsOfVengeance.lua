@@ -136,80 +136,185 @@ end
 -- default settings
 local dfs = {
   pwr = {
+
     pre = {
-      IA = {lvl = 2, clr = {0,1,0,1,1}, events = {E_CLEU, E_SUU}, gain = immolation_aura_pain_gain, Update = function(self,e,...)
-        UpdateSpellAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
-      end}
+      
+      IA = {
+        lvl = 2,
+        clr = {0,1,0,1,1},
+        events = {E_CLEU, E_SUU},
+        gain = immolation_aura_pain_gain,
+        Update = function(self,e,...)
+          UpdateSpellAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
+        end}
     },
     gain = {
-      IA = {lvl = 4, clr = pwrGainClr, events = {E_UA}, gain = immolation_aura_pain_gain, Update = function(self)
 
-      end},
-      BT = {lvl = 5, clr = pwrGainClr, events = {E_UA}, gain = blade_turning_gain, Update = function(self)
-      end},
-      Me = {lvl = 3, clr = pwrGainClr, events = {E_UA}, gain = metamorphosis_pain_gain, Update = function(self)
-      end}
+      IA = {
+        lvl = 4,
+        clr =
+        pwrGainClr,
+        events = {E_UA},
+        gain = immolation_aura_pain_gain,
+        Update = function(self)
+          self:Gain()
+        end},
+
+      BT = {
+        lvl = 5,
+        clr = pwrGainClr,
+        events = {E_UA},
+        gain = blade_turning_gain,
+        Update = function(self)
+          self:Gain()
+        end},
+
+      Me = {
+        lvl = 3,
+        clr = pwrGainClr,
+        events = {E_UA},
+        gain = metamorphosis_pain_gain,
+        Update = function(self)
+          self:Gain(self.available and self.gain or fueled_by_pain_gain)
+        end}
     },
+
     current = {
-      powerCurrent = {lvl = 6, clr = {1,1,0,1}, events = {E_UPF}, Update = function(self)
-        self.value = UnitHealth(p)
-        local nowMax = UnitHealthMax(p)
-        if nowMax ~= self.maxValue then
-          self.maxValue = nowMax
-          for type,ids in pairs(sections[self.res]) do
-            for id,_ in pairs(ids) do
-                  sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+
+      powerCurrent = {
+        lvl = 6,
+        clr = {1,1,0,1},
+        events = {E_UPF},
+        Update = function(self)
+          self.value = UnitPower(p)
+          local nowMax = UnitPowerMax(p)
+          if nowMax ~= self.maxValue then
+            self.maxValue = nowMax
+            for type,ids in pairs(sections[self.res]) do
+              for id,_ in pairs(ids) do
+                    sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+              end
             end
           end
         end
-      end
-    }
+    },
+
     background = {
-      powerBackground = {lvl = 1, clr = {0,0,0,0.5}, w = 200, h = 20, x = 0, y = -50, sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", lrIA = 1, clrID = 0.6},
+      powerBackground = {
+        lvl = 1,
+        clr = {0,0,0,0.5},
+        w = 200,
+        h = 20,
+        x = 0,
+        y = -50,
+        sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
+        lrIA = 1,
+        clrID = 0.6},
     },
   },
 
   hp = {
-    pre = {
-      FoS = {lvl = 4, clr = {0,0.6,0,1}, events = {E_UPF}, Update = function(self)
 
-      end},
-      Scl = {lvl = 5, clr = {0,1,0,1}, events = {E_UPF}, healSpell = GetSpellInfo(Sh), healMulti = function(self) GetSpellCount(self.spell) end, Update = function(self)
-        local power = UnitPower(p)
-        local power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
-        local soulCleaveMinHeal = soul_cleave_formula(GetAP())
-        self.value = (soulCleaveMinHeal * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar + self:GetHeal()) * self:GetCrit()
-      end},
-      SCa = {lvl = 3, clr = {1,0,1,1}, events = {E_CLEU, E_SUU}, healSpell = GetSpellInfo(Sh), healMulti = function() return soul_carver_soul_fragment_count end, Update = function(self,e,...)
-        UpdateSpellAvailability(self,function() self.value = self.available and immolation_aura_pain_gain or 0 end,e,...)
-      end}
+    pre = {
+
+      FoS = {
+        lvl = 4,
+        clr = {0,0.6,0,1},
+        events = {E_UPF},
+        Update = function(self)
+
+        end},
+
+      Scl = {
+        lvl = 5,
+        clr = {0,1,0,1},
+        events = {E_UPF},
+        healSpell = GetSpellInfo(Sh),
+        Update = function(self)
+          local power = sections[pwr].current.powerCurrent.value
+          if power >= soul_cleave_min_cost then
+            power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
+            self:GetHeal(
+              GetSpellCount(self.healSpell),
+              function()
+                return soul_cleave_formula(GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar)
+              end
+            )
+          else
+            self.value = 0
+          end
+        end},
+
+      SCa = {
+        lvl = 3,
+        clr = {1,0,1,1},
+        events = {E_CLEU, E_SUU},
+        healSpell = GetSpellInfo(Sh),
+        Update = function(self,e,...)
+          UpdateSpellAvailability(self, function()
+            if self.available then
+              self:GetHeal(soul_carver_soul_fragment_count)
+            else
+              self.value = 0
+            end
+          end,e,...)
+        end}
     },
+
     gain = {
-      FoS = {lvl = 6, clr = {0.6,0.6,0.6,1}, events = {E_UA}, Update = function(self)
-        self:Gain()
-      end}
+
+      FoS = {
+        lvl = 6,
+        clr = {0.6,0.6,0.6,1},
+        events = {E_UA},
+        Update = function(self)
+          self:Gain()
+        end}
     },
+
     current = {
-      healthCurrent = {lvl = 7, clr = {1,1,1,1}, events = {E_UHF}, Update = function(self)
-        self.value = UnitPower(p)
-        local nowMax = UnitPowerMax(p)
-        if nowMax ~= self.maxValue then
-          self.maxValue = nowMax
-          for type,ids in pairs(sections[self.res]) do
-            for id,_ in pairs(ids) do
-                  sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+
+      healthCurrent = {
+        lvl = 7,
+        clr = {1,1,1,1},
+        events = {E_UHF},
+        Update = function(self)
+            self.value = UnitHealth(p)
+            local nowMax = UnitHealthMax(p)
+            if nowMax ~= self.maxValue then
+              self.maxValue = nowMax
+              for type,ids in pairs(sections[self.res]) do
+                for id,_ in pairs(ids) do
+                      sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+                end
+              end
             end
           end
-        end
-      end
     },
+
     background = {
-      healthBackground = {lvl = 1, clr = {0,0,0,0.5}, w = 200, h = 20, x = 0, y = -50, sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", lrIA = 1, clrID = 0.6},
+
+      healthBackground = {
+        lvl = 1,
+        clr = {0,0,0,0.5},
+        w = 200,
+        h = 20,
+        x = 0,
+        y = -50,
+        sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
+        lrIA = 1,
+        clrID = 0.6},
     },
+
     absorbs = {
-      current = {lvl = 2, clr = {0,1,1,1}, events = {E_UAAC} Update = function(self)
-        self.value = UnitGetTotalAbsorbs(p)
-      end}
+
+      current = {
+        lvl = 2,
+        clr = {0,1,1,1},
+        events = {E_UAAC}
+        Update = function(self)
+          self.value = UnitGetTotalAbsorbs(p)
+        end}
     },
   },
 
@@ -251,9 +356,9 @@ local Section = {
    return self.crit and (GetCritChance() / 100) + 1 or 1
   end,
 
-  GetHeal = function(self)
+  GetHeal = function(self, baseMulti, additiveHeal)
     local h1,h2 = GetSpellDescription(select(7,GetSpellInfo(self.healSpell))):match("(%d+),(%d+)")
-    return tonumber(h1..h2) * self.healMulti()
+    self.value = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or 1)) * self:GetCrit()
   end,
 
   GetAP = function()
@@ -298,8 +403,7 @@ function Section:New(res,type,id)
   new.events = su.events
   new.gain = sd.gain
   new.spell = GetSpellInfo(id)
-  new.healSpell = sd.healSpell or spell
-  new.healMulti = sd.healMulti or function() return 1 end
+  new.healSpell = sd.healSpell or new.spell
   new.directParent = type == pwr and pwrFrame or hpFrame
   new.Update = sd.Update
   new.bar = CreateFrame("StatusBar",nil,new.directParent)
@@ -387,7 +491,8 @@ local function Init()
       frame:RegisterEvent(event)
       mapping[event] = function(...)
         for _,handler in ipairs(handlers) do
-          handler.handler(...)
+          local h = handler.handler
+          frame:h(...)
         end
       end
     end
@@ -413,9 +518,3 @@ local function Init()
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
 end
 -------------------------------------------------------------------------------
-
-
------------------------ value prediction ---------------------------------------
-
-
---------------------------------------------------------------------------------
