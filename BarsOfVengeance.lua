@@ -199,7 +199,8 @@ local dfs = {
             end
           end
         end
-    },
+    }
+  },
 
     background = { -- background bar
       powerBackground = {
@@ -239,9 +240,8 @@ local dfs = {
             self:GetHeal(
               GetSpellCount(self.healSpell),
               function()
-                return soul_cleave_formula(GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar)
-              end
-            )
+                return soul_cleave_formula(GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar
+              end)
           else
             self.value = 0
           end
@@ -292,6 +292,7 @@ local dfs = {
               end
             end
           end
+        }
     },
 
     background = {
@@ -313,17 +314,16 @@ local dfs = {
       current = {
         lvl = 2,
         clr = {0,1,1,1},
-        events = {E_UAAC}
+        events = {E_UAAC},
         Update = function(self)
           self.value = UnitGetTotalAbsorbs(p)
         end}
     },
-  },
-
+  }
 }
 
-defaultSettings.__index = defaultSettings
-BarsOfVengeanceUserSettings = setmetatable({},defaultSettings) -- only a few settings
+dfs.__index = dfs
+BarsOfVengeanceUserSettings = setmetatable({},dfs) -- only a few settings
 -- should be changable by the user, so must stuff is accessed via the meta table
 -------------------------------------------------------------------------------
 
@@ -395,7 +395,7 @@ local Section = {
   Move = function(self)
 
   end
-},
+}
 
 function Section:New(res,type,id) -- constructor for new sections
   local surt = BarsOfVengeanceUserSettings[res][type] -- shortcuts
@@ -451,7 +451,7 @@ end
 
 
 -- reacts to talent updates
-local function UpdateTalents
+local function UpdateTalents()
   local t = select(2, GetTalentTierInfo(FoSL.row, FoSL.column )) == 1
   local func = t and "Talent" or "Untalent"
   Invoke(hp,gain,FoS,func)
@@ -470,7 +470,7 @@ local function SetupFrames()
   pwrFrame:SetHeight(pwrs.h)
   pwrFrame:SetPoint(center, center, pwrs.x, pwrs.y)
 
-  hpFrame:SetPoint(center, center, hps.x, hps.y
+  hpFrame:SetPoint(center, center, hps.x, hps.y)
   hpFrame:SetWidth(hps.w)
   hpFrame:SetHeight(hps.h)
 end
@@ -499,12 +499,12 @@ local function Init()
     end
   end
 
-  -- Creates the addon's "OnEvent" event handler  
+  -- Creates the addon's "OnEvent" event handler
   local function CreateEventHandler(frame,storage)
     frame:UnregisterAllEvents()
     local mapping = {}
     for event, handlers in ipairs(storage) do
-      table.sort(handlers, function(h1,h2) return h1.lvl > h2.lvl)
+      table.sort(handlers, function(h1,h2) return h1.lvl > h2.lvl end)
       frame:RegisterEvent(event)
       mapping[event] = function(...)
         for _,handler in ipairs(handlers) do
@@ -539,4 +539,6 @@ local function Init()
 
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
 end
+
+Init()
 -------------------------------------------------------------------------------
