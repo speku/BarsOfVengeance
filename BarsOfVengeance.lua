@@ -206,8 +206,10 @@ dfs = {
           local nowMax = UnitPowerMax(p)
           if nowMax ~= self.maxValue then
             self.maxValue = nowMax
+            self.bar:SetMinMaxValues(0, nowMax)
             IterateTable(sections, function(res,type,id)
               sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+              sections[res][type][id].bar:SetMinMaxValues(0, nowMax)
             end)
           end
         end
@@ -222,7 +224,7 @@ dfs = {
         w = 200, -- width of power bars
         h = 20, -- height of power bars
         x = 0, -- x-offset of power bars from the addons' parent frame
-        y = -50, -- equivalent y-offset
+        y = -150, -- equivalent y-offset
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", -- status bar texture used for power bars
         lrIA = 1, -- color saturation of bars of which the underlying spell is meant to be used
         clrID = 0.6}, -- color saturation of bars of which the underlying spell should not be used
@@ -309,8 +311,10 @@ dfs = {
           local nowMax = UnitHealthMax(p)
           if nowMax ~= self.maxValue then
             self.maxValue = nowMax
+            self.bar:SetMinMaxValues(0, nowMax)
             IterateTable(sections, function(res,type,id)
               sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
+              sections[res][type][id].bar:SetMinMaxValues(0, nowMax)
             end)
           end
         end
@@ -326,7 +330,7 @@ dfs = {
         w = 200,
         h = 20,
         x = 0,
-        y = -50,
+        y = -100,
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
         lrIA = 1,
         clrID = 0.6},
@@ -374,10 +378,10 @@ local Section = {
   crit = true,
   Show = function(self) if self.bar then self.bar:Show() end end,
   Hide = function(self) if self.bar then self.bar:Hide() end end,
-  Disable = function(self) if self.bar then self.bar:Disable() end end,
-  Enable = function(self) if self.bar then self.bar:Enable() end end,
-  Untalent = function(self) self.Disable() self.Hide() self.enabled = false end,
-  Talent = function(self) self.Enable() self.Show() self.enabled = true end,
+  Disable = function(self) if self.bar then self.bar:Hide() end end,
+  Enable = function(self) if self.bar then self.bar:Show() end end,
+  Untalent = function(self) self:Disable() self:Hide() self.enabled = false end,
+  Talent = function(self) self:Enable() self:Show() self.enabled = true end,
 
   Gain = function(self,val) -- used for guaranteed buff gainsw
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
@@ -410,15 +414,17 @@ local Section = {
   Accumulate = function(self) -- accumulates all values from sections with a lower/equal level compared to the current section
     -- this accumulated value will then be used to represent the value of the associated status bar
     local total = 0
-    for type, ids in pairs(dfs[self.res]) do
-      for id,_ in pairs(ids) do
+    for type, typeTable in pairs(sections[self.res]) do
+      for id, idTable in pairs(typeTable) do
         local s = sections[self.res][type][id]
-        if s.lvl <= self.lvl then
+        if s.lvl > self.lvl then
           total = total + s.value
+        elseif s.lvl < self.lvl then
+          s.bar:SetValue(s:Accumulate())
         end
       end
     end
-    return total
+    return total + self.value
   end,
 
   Move = function(self)
@@ -444,8 +450,13 @@ function Section:New(res,type,id) -- constructor for new sections
   new.bar = CreateFrame("StatusBar",nil,new.directParent) -- the related status bar
   new.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   new.bar:SetStatusBarColor(unpack(su.clr))
+  if id ~= "background" then
+    new.bar:SetBackdrop(nil)
+  end
+  -- new.bar:SetBackdropColor(0,0,0,0)
   new.bar:SetPoint("TOPLEFT")
   new.bar:SetPoint("BOTTOMRIGHT")
+  new.bar:SetFrameStrata(lvlToStrata[new.lvl])
   local min, max
   if res == pwr then
     min,max = UnitPower(p),UnitPowerMax(p)
@@ -464,23 +475,25 @@ end
 -- reacts to changes of artifact traits
 -- relevant for Soul Carver and Devour Souls
 local function UpdateArtifactTraits()
-  local u,e,a=UIParent,"ARTIFACT_UPDATE",C_ArtifactUI
-   u:UnregisterEvent(e)
-   SocketInventoryItem(16)
-   local _,_,rank,_,bonusRank = a.GetPowerInfo(select(7,GetSpellInfo(DS)))
-   devour_souls_scalar = 1 + (rank + bonusRank) * 0.03
-   Invoke(hp,pre,SCa,select(3,a.GetPowerInfo(Sca)) > 0 and "Talent" or "Untalent")
-   a.Clear()
-   u:RegisterEvent(e)
+  -- print("traits updated")
+  -- local u,e,a=UIParent,"ARTIFACT_UPDATE",C_ArtifactUI
+  --  u:UnregisterEvent(e)
+  --  SocketInventoryItem(16)
+  --  print(a.GetPowerInfo(DS))
+  --  local _,_,rank,_,bonusRank = a.GetPowerInfo(DS)
+  --  devour_souls_scalar = 1 + (rank + bonusRank) * 0.03
+  --  Invoke(hp,pre,SCa,select(3,a.GetPowerInfo(Sca)) > 0 and "Talent" or "Untalent")
+  --  a.Clear()
+  --  u:RegisterEvent(e)
 end
 
 
--- invokes argumentless functions of sections
+-- invokes argumentless methods of sections
 local function Invoke(res,type,id,...)
   local s = sections[res][type][id]
   if s then
     for _,func in pairs({...}) do
-      s[func]()
+      s[func](s)
     end
   end
 end
@@ -491,24 +504,29 @@ local function UpdateTalents()
   local t = select(2, GetTalentTierInfo(FoSL.row, FoSL.column )) == 1
   local func = t and "Talent" or "Untalent"
   Invoke(hp,gain,FoS,func)
-  Invoke(hp,pre,FoS,t,func)
+  Invoke(hp,pre,FoS,func)
 end
 
 
 -- initial setup of frames/bars
 local function SetupFrames()
-  local pwrs = BarsOfVengeanceUserSettings[pwr].background.powerBackground
-  local hps = BarsOfVengeanceUserSettings[hp].background.powerBackground
+  local pwrs = BarsOfVengeanceUserSettings[pwr].background.background
+  local hps = BarsOfVengeanceUserSettings[hp].background.background
 
-  frame:SetPoint(center)
+  frame:SetPoint("TOPLEFT")
+  frame:SetPoint("BOTTOMRIGHT")
 
   pwrFrame:SetWidth(pwrs.w)
   pwrFrame:SetHeight(pwrs.h)
-  pwrFrame:SetPoint(center, center, pwrs.x, pwrs.y)
+  pwrFrame:SetPoint(center, frame, center, 10, -500)
 
-  hpFrame:SetPoint(center, center, hps.x, hps.y)
+  hpFrame:SetPoint(center, frame, center, 20, 500)
   hpFrame:SetWidth(hps.w)
   hpFrame:SetHeight(hps.h)
+
+  frame:Show()
+  hpFrame:Show()
+  pwrFrame:Show()
 end
 
 -- initializes all sections and build a customized event listener
@@ -555,6 +573,10 @@ local function Init()
     mapping[E_SC] = UpdateArtifactTraits
     mapping[E_PTU] = UpdateTalents
 
+    frame:RegisterEvent(E_PEW)
+    frame:RegisterEvent(E_SC)
+    frame:RegisterEvent(E_PTU)
+
     return function(f,e,...)
       mapping[e](...)
     end
@@ -579,4 +601,5 @@ local function Init()
 end
 
 Init()
+SetupFrames()
 -------------------------------------------------------------------------------
