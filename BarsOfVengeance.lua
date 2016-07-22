@@ -209,7 +209,7 @@ dfs = {
             self.bar:SetMinMaxValues(0, nowMax)
             IterateTable(sections, function(res,type,id)
               sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
-              sections[res][type][id].bar:SetMinMaxValues(0, nowMax)
+              sections[res][type][id]:SetMinMaxBarValues(0, nowMax)
             end)
           end
         end
@@ -311,10 +311,10 @@ dfs = {
           local nowMax = UnitHealthMax(p)
           if nowMax ~= self.maxValue then
             self.maxValue = nowMax
-            self.bar:SetMinMaxValues(0, nowMax)
+            self:SetMinMaxBarValues(0, nowMax)
             IterateTable(sections, function(res,type,id)
               sections[res][type][id]:TriggerUpdate("maxValue", nowMax)
-              sections[res][type][id].bar:SetMinMaxValues(0, nowMax)
+              sections[res][type][id]:SetMinMaxBarValues(0, nowMax)
             end)
           end
         end
@@ -420,7 +420,7 @@ local Section = {
         if s.lvl > self.lvl then
           total = total + s.value
         elseif s.lvl < self.lvl then
-          s.bar:SetValue(s:Accumulate())
+          s:SetBarValue(s:Accumulate())
         end
       end
     end
@@ -429,6 +429,18 @@ local Section = {
 
   Move = function(self)
 
+  end,
+
+  SetMinMaxBarValues = function(self, min, max)
+    if self.id ~= background then
+      self.bar:SetMinMaxValues(min,max)
+    end
+  end,
+
+  SetBarValue = function(self, value)
+    if self.id ~= background then
+      self.bar:SetValue(value)
+    end
   end
 }
 
@@ -450,20 +462,22 @@ function Section:New(res,type,id) -- constructor for new sections
   new.bar = CreateFrame("StatusBar",nil,new.directParent) -- the related status bar
   new.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   new.bar:SetStatusBarColor(unpack(su.clr))
-  if id ~= "background" then
-    new.bar:SetBackdrop(nil)
-  end
   -- new.bar:SetBackdropColor(0,0,0,0)
   new.bar:SetPoint("TOPLEFT")
   new.bar:SetPoint("BOTTOMRIGHT")
   new.bar:SetFrameStrata(lvlToStrata[new.lvl])
-  local min, max
-  if res == pwr then
-    min,max = UnitPower(p),UnitPowerMax(p)
+  if id == background then
+    new.bar:SetMinMaxValues(0,100)
+    new.bar:SetValue(100)
   else
-    min,max = UnitHealth(p),UnitHealthMax(p)
+    local min, max
+    if res == pwr then
+      min,max = UnitPower(p),UnitPowerMax(p)
+    else
+      min,max = UnitHealth(p),UnitHealthMax(p)
+    end
+    new.bar:SetMinMaxValues(min,max)
   end
-  new.bar:SetMinMaxValues(min,max)
   self.__index = self
   return setmetatable(new, self)
 end
@@ -518,9 +532,9 @@ local function SetupFrames()
 
   pwrFrame:SetWidth(pwrs.w)
   pwrFrame:SetHeight(pwrs.h)
-  pwrFrame:SetPoint(center, frame, center, 10, -500)
+  pwrFrame:SetPoint(center, frame, center, 100, -500)
 
-  hpFrame:SetPoint(center, frame, center, 20, 500)
+  hpFrame:SetPoint(center, frame, center, 20, -100)
   hpFrame:SetWidth(hps.w)
   hpFrame:SetHeight(hps.h)
 
@@ -540,7 +554,7 @@ local function Init()
     local u = section.Update
     section.Update = function(section,...)
       u(section,...)
-      section.bar:SetValue(section:Accumulate())
+      section:SetBarValue(section:Accumulate())
     end
   end
 
