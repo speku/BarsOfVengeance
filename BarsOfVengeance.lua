@@ -71,6 +71,13 @@ local E_UA = "UNIT_AURA"
 local E_UAAC = "UNIT_ABSORB_AMOUNT_CHANGED"
 local E_UHF = "UNIT_HEALTH_FREQUENT"
 local E_UPF = "UNIT_POWER_FREQUENT"
+local E_PRD = "PLAYER_REGEN_DISABLED"
+local E_PRE = "PLAYER_REGEN_ENABLED"
+--------------------------------------------------------------------------------
+
+
+--------------------------- variables ------------------------------------------
+local inCombat = false
 --------------------------------------------------------------------------------
 
 
@@ -127,56 +134,6 @@ local absoluteAuraEvents = {
   SPELL_AURA_REMOVED = true,
 }
 
--- keeps track of spell availability and calls its function parameter upon
--- availability change
-local function UpdateAvailability(self,func,e,...)
-    if e == E_SUU then
-      local s = GetSpellCooldown(self.spell)
-      if s and s == 0 and not self.available then
-        self.available = true
-        if func then
-          func()
-        end
-      end
-    elseif e == E_CLEU then
-      if select(2,...) == "SPELL_CAST_SUCCESS" and select(4,...) == UnitGUID(p) and select(13,...) == self.spell then
-        self.available = false
-        if func then
-          func()
-        end
-      end
-    end
-end
-
-
-local function UpdateAura(args,self,...)
-  local e =  select(2,...)
-  if self.type == pre and doseAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.healCountSpell then
-    self.healCount = doseAuraEvents[e](16,...)
-  elseif self.type == gain and absoluteAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.spell then
-    print(self.spell,"amount", select(16,...))
-    if args then
-      self:Gain(args())
-    else
-      self:Gain()
-    end
-  end
-end
-
-
-local function UpdateResource(self,isPower)
-    self.value = isPower and UnitPower(p) or UnitHealth(p)
-    local newMax = isPower and UnitPowerMax(p) or UnitHealthMax(p)
-    if newMax ~= self.actualMaxValue then
-      self:SetMaxValue(newMax)
-      for type, typeTable in pairs(sections[self.res]) do
-        for id, idTable in pairs(typeTable) do
-          sections[self.res][type][id]:SetMaxValue(newMax)
-        end
-      end
-    end
-  end
-
 
 local function IterateSections(func)
   for res,resTable in pairs(sections) do
@@ -185,6 +142,32 @@ local function IterateSections(func)
         func(res,type,id)
       end
     end
+  end
+end
+
+
+local otherEvents = {
+  PLAYER_ENTERING_WORLD = function(self)
+    self:UpdateResource()
+    self:AutoVisibility(true)
+  end,
+
+  PLAYER_REGEN_DISABLED = function(self)
+    inCombat = true
+    self:Show()
+  end,
+
+  PLAYER_REGEN_ENABLED = function(self)
+    inCombat = false
+    if self.hideOutOfCombat then
+      self:AutoVisibility()
+    end
+  end,
+}
+
+local function triggerOther(self,e,...)
+  if otherEvents[e] then
+    otherEvents[e](self,...)
   end
 end
 
@@ -204,7 +187,7 @@ dfs = {
         events = {E_CLEU, E_SUU}, -- events that cause the related value/bar to change
         gain = immolation_aura_total_pain,
         Update = function(self,e,...) -- function to be triggered upon relevant events -> causes a change in the related sections' value
-          UpdateAvailability(self,function() self.value = self.available and self.gain or 0 end,e,...)
+          self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
         end
       }
     },
@@ -254,7 +237,8 @@ dfs = {
         clr = {1,1,0,1},
         events = {E_UPF},
         Update = function(self)
-          UpdateResource(self, true)
+          self:UpdateResource()
+          self:AutoVisibility()
         end
     }
   },
@@ -269,6 +253,10 @@ dfs = {
         x = 0, -- x-offset of power bars from the addons' parent frame
         y = -170, -- equivalent y-offset
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", -- status bar texture used for power bars
+        events = {E_PEW, E_PRE, E_PRD},
+        Update = function(self,e,...)
+          triggerOther(self,e,...)
+        end
       },
     },
   },
@@ -303,7 +291,7 @@ dfs = {
         healCountSpell = SF,
         Update = function(self,e,...)
           if e == E_CLEU then
-            UpdateAura(nil,self,...)
+            self:UpdateAura(...)
           end
 
           local power = sections[pwr].current.power.value
@@ -329,7 +317,7 @@ dfs = {
         events = {E_CLEU, E_SUU},
         healSpell = GetSpellInfo(Sh),
         Update = function(self,e,...)
-          UpdateAvailability(self, function()
+          self:UpdateAvailability(function()
             if self.available then
               self:GetHeal(soul_carver_soul_fragment_count)
             else
@@ -362,7 +350,8 @@ dfs = {
         clr = {1,1,1,1},
         events = {E_UHF},
         Update = function(self)
-          UpdateResource(self, false)
+          self:UpdateResource()
+          self:AutoVisibility()
         end
       }
     },
@@ -378,6 +367,10 @@ dfs = {
         x = 0,
         y = -150,
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
+        events = {E_PEW, E_PRE, E_PRD},
+        Update = function(self,e,...)
+            triggerOther(self,e,...)
+        end
       },
     },
 
@@ -419,17 +412,20 @@ local Section = {
   parent = frame, --the addon's base frame
   enabled = true, -- whether or not the section is enabled
   value = 0, -- the current value of the section (e.g. for how much your next Soul Cleave would heal you)
-  actualMaxValue = 0, -- the max value of the section (usually represents the masimum amount of power / health the player can have)
+  actualMaxValue = 1, -- the max value of the section (usually represents the maximum amount of power / health the player can have)
   available = false, -- if the underlying spell (Soul Carver / Immolation Aura) is available
   latestAccumulatedValue = 0,
   healCount = 0,
   crit = true,
-  Show = function(self) if self.bar then self.bar:Show() end end,
-  Hide = function(self) if self.bar then self.bar:Hide() end end,
-  Disable = function(self) if self.bar then self.bar:Hide() end end,
-  Enable = function(self) if self.bar then self.bar:Show() end end,
-  Untalent = function(self) self:Disable() self:Hide() self.enabled = false end,
-  Talent = function(self) self:Enable() self:Show() self.enabled = true end,
+  hideOutOfCombat = true,
+  hideHealthThreshold = 100,
+  hidePowerThreshold = 0,
+  ShowBar = function(self) if self.bar then self.bar:Show() end end,
+  HideBar = function(self) if self.bar then self.bar:Hide() end end,
+  Show = function(self) self.directParent:Show() end,
+  Hide = function(self) self.directParent:Hide() end,
+  Untalent = function(self) self:HideBar() self.enabled = false end,
+  Talent = function(self) self:ShowBar() self.enabled = true end,
 
   Gain = function(self,total,val) -- used for guaranteed buff gainsw
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
@@ -516,7 +512,67 @@ local Section = {
         end
       end
     end
-  end
+  end,
+
+  UpdateResource = function(self)
+      local isPwr = self.res == pwr
+      self.value = isPwr and UnitPower(p) or UnitHealth(p)
+      local newMax = isPwr and UnitPowerMax(p) or UnitHealthMax(p)
+      if newMax ~= self.actualMaxValue then
+        self:SetMaxValue(newMax)
+        for type, typeTable in pairs(sections[self.res]) do
+          for id, idTable in pairs(typeTable) do
+            sections[self.res][type][id]:SetMaxValue(newMax)
+          end
+        end
+      end
+    end,
+
+    UpdateAura = function(self,...)
+      local e =  select(2,...)
+      if self.type == pre and doseAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.healCountSpell then
+        self.healCount = doseAuraEvents[e](16,...)
+      end
+    end,
+
+    -- keeps track of spell availability and calls its function parameter upon
+    -- availability change
+    UpdateAvailability = function(self,func,e,...)
+        if e == E_SUU then
+          local s = GetSpellCooldown(self.spell)
+          if s and s == 0 and not self.available then
+            self.available = true
+            if func then
+              func()
+            end
+          end
+        elseif e == E_CLEU then
+          if select(2,...) == "SPELL_CAST_SUCCESS" and select(4,...) == UnitGUID(p) and select(13,...) == self.spell then
+            self.available = false
+            if func then
+              func()
+            end
+          end
+        end
+    end,
+
+    AutoVisibility = function(self,pew)
+      if not inCombat then
+          if self.res == pwr then
+             if (pew and UnitPower(p) or sections[pwr].current.power.value) <= self.hidePowerThreshold then
+               self:Hide()
+             else
+               self:Show()
+             end
+          else
+            if (pew and UnitHealth(p) or sections[hp].current.health.value) / (pew and UnitHealthMax(p) or sections[hp].current.health.actualMaxValue) * 100 >= self.hideHealthThreshold  then
+              self:Hide()
+            else
+              self:Show()
+            end
+          end
+        end
+    end
 }
 
 function Section:New(res,type,id) -- constructor for new sections
@@ -536,6 +592,9 @@ function Section:New(res,type,id) -- constructor for new sections
   n.directParent = res == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
   n.Update = sd.Update -- updates the underlying value
   n.clr = su.clr
+  n.hideOutOfCombat = su.hideOutOfCombat
+  n.hideHealthThreshold = su.hideHealthThreshold
+  n.hidePowerThreshold = su.hidePowerThreshold
   n.useClr = su.useClr or n.Clr
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
@@ -546,12 +605,12 @@ function Section:New(res,type,id) -- constructor for new sections
   n.bar:SetMinMaxValues(0,maxValue)
   if id == background then
     n.bar:SetValue(maxValue)
-  else
-    n.actualMaxValue = res == hp and UnitHealthMax(p) or UnitPowerMax(p)
-    if n.actualMaxValue == 0 then
-      n.actualMaxValue = 1
-    end
-    n.bar:SetValue((res == hp and UnitHealth(p) or UnitPower(p)) / n.actualMaxValue * maxValue)
+  -- else
+  --   n.actualMaxValue = res == hp and UnitHealthMax(p) or UnitPowerMax(p)
+  --   if n.actualMaxValue == 0 then
+  --     n.actualMaxValue = 1
+  --   end
+  --   n.bar:SetValue((res == hp and UnitHealth(p) or UnitPower(p)) / n.actualMaxValue * maxValue)
   end
   self.__index = self
   return n
@@ -658,13 +717,13 @@ local function Init()
     end
 
     -- add section-unrelated event handlers
-    mapping[E_PEW] = UpdateArtifactTraits
-    mapping[E_SC] = UpdateArtifactTraits
-    mapping[E_PTU] = UpdateTalents
+    -- mapping[E_PEW] = UpdateArtifactTraits
+    -- mapping[E_SC] = UpdateArtifactTraits
+    -- mapping[E_PTU] = UpdateTalents
 
-    frame:RegisterEvent(E_PEW)
-    frame:RegisterEvent(E_SC)
-    frame:RegisterEvent(E_PTU)
+    -- frame:RegisterEvent(E_PEW)
+    -- frame:RegisterEvent(E_SC)
+    -- frame:RegisterEvent(E_PTU)
 
     return function(f,e,...)
       mapping[e](e,...)
