@@ -146,9 +146,9 @@ local function UpdateResource(self,isPower)
 
 
 local function IterateSections(func)
-  for _,res in pairs(sections) do
-    for _,type in pairs(res) do
-      for id,_ in pairs(type) do
+  for res,resTable in pairs(sections) do
+    for type,typeTable in pairs(resTable) do
+      for id,idTable in pairs(typeTable) do
         func(res,type,id)
       end
     end
@@ -208,7 +208,7 @@ dfs = {
         events = {E_UA, E_CLEU, E_SUU},
         gain = metamorphosis_pain_gain,
         Update = function(self,e,...)
-          UpdateAvailability(self,function() self:Gain(self.available and self.gain or fueled_by_pain_gain) end,e,...)
+          -- UpdateAvailability(self,function() self:Gain(self.available and self.gain or fueled_by_pain_gain) end,e,...)
         end
       }
     },
@@ -232,9 +232,9 @@ dfs = {
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200, -- width of power bars
-        h = 20, -- height of power bars
+        h = 15, -- height of power bars
         x = 0, -- x-offset of power bars from the addons' parent frame
-        y = -150, -- equivalent y-offset
+        y = -170, -- equivalent y-offset
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", -- status bar texture used for power bars
       },
     },
@@ -337,9 +337,9 @@ dfs = {
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200,
-        h = 20,
+        h = 15,
         x = 0,
-        y = -100,
+        y = -150,
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
       },
     },
@@ -418,22 +418,24 @@ local Section = {
   end,
 
   Accumulate = function(self)
-    self.latestAccumulatedValue = self:AccumulateAbove()
+    self.latestAccumulatedValue = self:PropagateAbove()
     local func = function(self)
       self:SetBarValue(self.latestAccumulatedValue)
     end
-    self:func()
-    self:AccumulateBelow(self.latestAccumulatedValue, func)
+    func(self)
+    self:PropagateBelow(0, func, true)
   end,
 
-  AccumulateAbove = function(self)
+  PropagateAbove = function(self)
     return self.id ~= background and (self.value + (self.above and self.above:PropagateAbove() or 0)) or 0
   end,
 
-  PropagateBelow = function(self,valFromAbove, func)
-    self.latestAccumulatedValue = valFromAbove + self.value
-    if func then
-      self:func()
+  PropagateBelow = function(self,valFromAbove, func, initial)
+    if not initial then
+      self.latestAccumulatedValue = valFromAbove + self.value
+      if func then
+        func(self)
+      end
     end
     if self.below and self.below.id ~= background then
       self.below:PropagateBelow(self.latestAccumulatedValue, func)
@@ -460,6 +462,7 @@ local Section = {
       for id,_ in pairs(typeTable) do
         local other = sections[self.res][type][id]
         if other.lvl == self.lvl - 1 then
+          print("below ",self.spell, self.type, "comes",other.spell, other.type)
           self.below = other
         elseif other.lvl == self.lvl + 1 then
           self.above = other
