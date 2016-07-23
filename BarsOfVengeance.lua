@@ -50,8 +50,6 @@ local t = "type"
 local sbt = "statusBarTexture"
 local sbMin = 0
 local sbMax = 100
-local clrIA = "colorIntensityActive"
-local clrID = "colorIntensityDisabled"
 local pwrGainClr = {0.6,0.6,0,1}
 local hpXOffset = "hpXOffset"
 local hpYOffset = "hpYOffset"
@@ -146,6 +144,17 @@ local function UpdateResource(self,isPower)
     end
   end
 
+
+local function IterateSections(func)
+  for _,res in pairs(sections) do
+    for _,type in pairs(res) do
+      for id,_ in pairs(type) do
+        func(res,type,id)
+      end
+    end
+  end
+end
+
 ------------------------------- settings ---------------------------------------
 
 -- default settings
@@ -227,8 +236,6 @@ dfs = {
         x = 0, -- x-offset of power bars from the addons' parent frame
         y = -150, -- equivalent y-offset
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", -- status bar texture used for power bars
-        lrIA = 1, -- color saturation of bars of which the underlying spell is meant to be used
-        clrID = 0.6 -- color saturation of bars of which the underlying spell should not be used
       },
     },
   },
@@ -240,7 +247,8 @@ dfs = {
       [FoS] = { -- Feast of Souls
         enabled = true,
         lvl = 4,
-        clr = {0,0.6,0,1},
+        clr = {0,0.4,0,1},
+        useClr = {0,0.6,0,1},
         events = {E_UPF},
         Update = function(self)
           local power = sections[pwr].current.power.value
@@ -255,7 +263,8 @@ dfs = {
       [SCl] = { -- Soul Cleave
         enabled = true,
         lvl = 5,
-        clr = {0,1,0,1},
+        clr = {0,0.6,0,1},
+        useClr = {0,1,0,1},
         events = {E_UPF},
         healSpell = Sh,
         Update = function(self)
@@ -277,7 +286,8 @@ dfs = {
       [SCa] = { -- Soul Carver
         enabled = true,
         lvl = 3,
-        clr = {1,0,1,1},
+        clr = {0.6,0,0.6,1},
+        useClr = {1,0,1,1},
         crit = false,
         events = {E_CLEU, E_SUU},
         healSpell = GetSpellInfo(Sh),
@@ -331,8 +341,6 @@ dfs = {
         x = 0,
         y = -100,
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
-        lrIA = 1,
-        clrID = 0.6
       },
     },
 
@@ -409,21 +417,27 @@ local Section = {
     return b + p + n
   end,
 
-  Accumulate = function(self) -- accumulates all values from sections with a lower/equal level compared to the current section
-    -- this accumulated value will then be used to represent the value of the associated status bar
-    local total = 0
-    for type, typeTable in pairs(sections[self.res]) do
-      for id, idTable in pairs(typeTable) do
-        local s = sections[self.res][type][id]
-        if s.lvl > self.lvl then
-          total = total + s.value
-        elseif s.lvl < self.lvl then
-          s:SetBarValue(s:Accumulate())
-        end
-      end
+  Accumulate = function(self)
+    self.latestAccumulatedValue = self:AccumulateAbove()
+    local func = function(self)
+      self:SetBarValue(self.latestAccumulatedValue)
     end
-    self.latestAccumulatedValue = total + self.value
-    return self.latestAccumulatedValue
+    self:func()
+    self:AccumulateBelow(self.latestAccumulatedValue, func)
+  end,
+
+  AccumulateAbove = function(self)
+    return self.id ~= background and (self.value + (self.above and self.above:PropagateAbove() or 0)) or 0
+  end,
+
+  PropagateBelow = function(self,valFromAbove, func)
+    self.latestAccumulatedValue = valFromAbove + self.value
+    if func then
+      self:func()
+    end
+    if self.below and self.below.id ~= background then
+      self.below:PropagateBelow(self.latestAccumulatedValue, func)
+    end
   end,
 
   Move = function(self)
@@ -439,6 +453,19 @@ local Section = {
   SetMaxValue = function(self, actualMaxValue)
     self.actualMaxValue = actualMaxValue
     self:SetBarValue(self.latestAccumulatedValue)
+  end,
+
+  SetNeighbours = function(self)
+    for type, typeTable in pairs(sections[self.res]) do
+      for id,_ in pairs(typeTable) do
+        local other = sections[self.res][type][id]
+        if other.lvl == self.lvl - 1 then
+          self.below = other
+        elseif other.lvl == self.lvl + 1 then
+          self.above = other
+        end
+      end
+    end
   end
 }
 
@@ -457,9 +484,11 @@ function Section:New(res,type,id) -- constructor for new sections
   n.healSpell = sd.healSpell and sd.healSpell or n.id -- whether or not heals should be predicted according to different spells than the normal one
   n.directParent = res == pwr and pwrFrame or hpFrame -- immediate frame parent (so that power /health frames can be moves as a union )
   n.Update = sd.Update -- updates the underlying value
+  n.clr = su.clr
+  n.useClr = su.useClr or n.Clr
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
-  n.bar:SetStatusBarColor(unpack(su.clr))
+  n.bar:SetStatusBarColor(unpack(n.clr))
   n.bar:SetPoint("TOPLEFT")
   n.bar:SetPoint("BOTTOMRIGHT")
   n.bar:SetFrameStrata(lvlToStrata[n.lvl])
@@ -549,7 +578,7 @@ local function Init()
     local u = section.Update
     section.Update = function(section,...)
       u(section,...)
-      section:SetBarValue(section:Accumulate())
+      section:Accumulate()
     end
   end
 
@@ -606,8 +635,54 @@ local function Init()
       end
     end
   end
+
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
+  IterateSections(function(res,type,id) sections[res][type][id]:SetNeighbours() end)
+
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 SetupFrames()
 Init()
