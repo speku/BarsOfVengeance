@@ -124,6 +124,7 @@ local doseAuraEvents = {
 local absoluteAuraEvents = {
   SPELL_AURA_APPLIED = true,
   SPELL_AURA_REFRESH = true,
+  SPELL_AURA_REMOVED = true,
 }
 
 -- keeps track of spell availability and calls its function parameter upon
@@ -148,13 +149,17 @@ local function UpdateAvailability(self,func,e,...)
 end
 
 
-local function UpdateAura(self,...)
+local function UpdateAura(args,self,...)
   local e =  select(2,...)
   if self.type == pre and doseAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.healCountSpell then
     self.healCount = doseAuraEvents[e](16,...)
   elseif self.type == gain and absoluteAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.spell then
     print(self.spell,"amount", select(16,...))
-    self:Gain(metamorphosis_per_second_gain * select(16,...))
+    if args then
+      self:Gain(args())
+    else
+      self:Gain()
+    end
   end
 end
 
@@ -211,9 +216,9 @@ dfs = {
         lvl = 4,
         clr =
         pwrGainClr,
-        events = {E_UA},
+        events = {E_UPF},
         gain = immolation_aura_pain_per_sec,
-        Update = function(self)
+        Update = function(self,e,...)
           self:Gain()
         end
       },
@@ -222,10 +227,10 @@ dfs = {
         enabled = true,
         lvl = 5,
         clr = pwrGainClr,
-        events = {E_UA},
+        events = {E_UPF},
         gain = blade_turning_total_gain,
-        Update = function(self)
-          self:Gain(true)
+        Update = function(self,e,...)
+          self:Gain()
         end
       },
 
@@ -233,11 +238,9 @@ dfs = {
         enabled = true,
         lvl = 3,
         clr = pwrGainClr,
-        events = {E_UA}, -- E_SUU, E_CLEU
+        events = {E_UPF}, -- E_SUU, E_CLEU
         gain = metamorphosis_pain_per_sec,
-        Update = function(self)
-          --UpdateAvailability(self,nil,e,...)
-          --UpdateAura(self,...)
+        Update = function(self,e,...)
           self:Gain()
         end
       }
@@ -293,27 +296,26 @@ dfs = {
       [SCl] = { -- Soul Cleave
         enabled = true,
         lvl = 5,
-        -- clr = {0,0.6,0,1},
-        clr = {0,1,0,1},
+        clr = {0,0.6,0,1},
         useClr = {0,1,0,1},
         events = {E_UPF, E_CLEU},
         healSpell = Sh,
         healCountSpell = SF,
         Update = function(self,e,...)
-          if e == E_UPF then
-            local power = sections[pwr].current.power.value
+          if e == E_CLEU then
+            UpdateAura(nil,self,...)
+          end
+
+          local power = sections[pwr].current.power.value
+
+          if power >= soul_cleave_min_cost then
             power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
             function func()
               return soul_cleave_formula(self:GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar
             end
-            if power >= soul_cleave_min_cost then
-              self:GetHeal(nil,func)
-            else
-              self.value = 0
-            end
-          else
-            UpdateAura(self,...)
             self:GetHeal(nil,func)
+          else
+            self.value = 0
           end
         end,
       },
@@ -345,8 +347,8 @@ dfs = {
         lvl = 6,
         crit = false,
         clr = {0.6,0.6,0.6,1},
-        events = {E_UA},
-        Update = function(self)
+        events = {E_UHF},
+        Update = function(self,e,...)
           self:Gain(true,self:GetHeal(1,nil,true))
         end
       }
