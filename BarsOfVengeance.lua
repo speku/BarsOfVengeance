@@ -210,10 +210,10 @@ dfs = {
         enabled = true,
         lvl = 5,
         clr = pwrGainClr,
-        events = {E_UPF},
+        events = {E_UA},
         gain = blade_turning_total_gain,
         Update = function(self,e,...)
-          self:Gain()
+          self:Gain(nil,nil,true)
         end
       },
 
@@ -427,11 +427,14 @@ local Section = {
   Untalent = function(self) self:HideBar() self.enabled = false end,
   Talent = function(self) self:ShowBar() self.enabled = true end,
 
-  Gain = function(self,total,val) -- used for guaranteed buff gainsw
+  Gain = function(self,total,val,absolute) -- used for guaranteed buff gainsw
     local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
     if buffed then
       local remaining = expirationTime - GetTime()
-      if total then
+      if absolute then
+        self.value = self.gain
+        print(self.value)
+      elseif total then
         self.value = remaining / duration * (val and val or self.gain)
       else
         self.value = remaining * self.gain
