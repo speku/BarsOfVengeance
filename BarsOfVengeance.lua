@@ -10,10 +10,11 @@
 local FoS = 207697 -- Feast of Souls
 local SCl = 203798 -- Soul Cleave
 local SCa = 207407 -- Soul Carver
+local SCaPI = 1096 -- Soul Carver Power Info
 local BT = 203753 -- Blade Turning
 local IA = 178740 -- Immolation Aura
 local Me = 191427 -- Metamorphosis
-local DS = 212821 -- Devour Souls
+local DSPI = 1233  -- Devour Souls -> powerID
 local FbP = 213017 -- Fueled by Pain
 local Sh = 203783 -- Shear
 local SF = 203981 -- Soul Fragments
@@ -58,6 +59,7 @@ local pwrXOffset = "pwrXOffset"
 local pwrYOffset = "pwrYOffset"
 local background = "background"
 local center = "CENTER"
+local over = "over"
 --------------------------------------------------------------------------------
 
 
@@ -118,6 +120,9 @@ local hpFrame = CreateFrame(f,nil,frame) -- health frame
 ------------------------ forward declarations ----------------------------------
 local dfs
 local sections
+local UpdateTalents
+local UpdateArtifactTraits
+local Invoke
 
 --------------------------------------------------------------------------------
 local function selector(n,...) return select(n,...) end
@@ -267,7 +272,7 @@ dfs = {
 
       [FoS] = { -- Feast of Souls
         enabled = true,
-        lvl = 4,
+        lvl = 5,
         clr = {0,0.4,0,1},
         useClr = {0,0.6,0,1},
         events = {E_UPF},
@@ -283,7 +288,7 @@ dfs = {
 
       [SCl] = { -- Soul Cleave
         enabled = true,
-        lvl = 5,
+        lvl = 6,
         clr = {0,0.6,0,1},
         useClr = {0,1,0,1},
         events = {E_UPF, E_CLEU},
@@ -310,11 +315,11 @@ dfs = {
 
       [SCa] = { -- Soul Carver
         enabled = true,
-        lvl = 3,
+        lvl = 4,
         clr = {0.6,0,0.6,1},
         useClr = {1,0,1,1},
         crit = false,
-        events = {E_CLEU, E_SUU},
+        events = {E_CLEU, E_SUU, E_SC},
         healSpell = GetSpellInfo(Sh),
         Update = function(self,e,...)
           self:UpdateAvailability(function()
@@ -332,7 +337,7 @@ dfs = {
 
       [FoS] = { -- Feast of Souls
         enabled = true,
-        lvl = 6,
+        lvl = 7,
         crit = false,
         clr = {0.6,0.6,0.6,1},
         events = {E_UHF},
@@ -346,7 +351,7 @@ dfs = {
 
       health = {
         enabled = true,
-        lvl = 7,
+        lvl = 8,
         clr = {1,1,1,1},
         events = {E_UHF},
         Update = function(self)
@@ -367,9 +372,16 @@ dfs = {
         x = 0,
         y = -150,
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
-        events = {E_PEW, E_PRE, E_PRD},
+        events = {E_PEW, E_PRE, E_PRD, E_PTU, E_SC},
         Update = function(self,e,...)
+          if e == E_PTU then
+            UpdateTalents()
+          else
+            if e == E_PEW or e == E_SC then
+              UpdateArtifactTraits()
+            end
             triggerOther(self,e,...)
+          end
         end
       },
     },
@@ -378,12 +390,19 @@ dfs = {
 
       current = {
         enabled = true,
-        lvl = 2,
-        clr = {0,1,1,1},
+        lvl = 3,
+        clr = {0,0.6,0.6,1},
         events = {E_UAAC},
         Update = function(self)
           self.value = UnitGetTotalAbsorbs(p)
         end
+      },
+
+      over = {
+        enabled = true,
+        lvl = 2,
+        clr = {0,1,1,1},
+        multi = 2
       }
     },
   }
@@ -416,6 +435,7 @@ local Section = {
   available = false, -- if the underlying spell (Soul Carver / Immolation Aura) is available
   latestAccumulatedValue = 0,
   healCount = 0,
+  multi = 1,
   crit = true,
   hideOutOfCombat = true,
   hideHealthThreshold = 100,
@@ -474,12 +494,12 @@ local Section = {
   end,
 
   PropagateAbove = function(self)
-    return self.id ~= background and (self.value + (self.above and self.above:PropagateAbove() or 0)) or 0
+    return self.id ~= background and ((self.enabled and self.value or 0) + (self.above and self.above:PropagateAbove() or 0)) or 0
   end,
 
   PropagateBelow = function(self,valFromAbove, func, initial)
     if not initial then
-      self.latestAccumulatedValue = valFromAbove + self.value
+      self.latestAccumulatedValue = valFromAbove + (self.enabled and self.value or 0)
       if func then
         func(self)
       end
@@ -495,7 +515,18 @@ local Section = {
 
   SetBarValue = function(self, value)
     if self.id ~= background then
+      if self.id == over then
+       local health = sections[hp].current.health.value
+       local maxHealth = sections[hp].current.health.actualMaxValue
+       local absorbs = sections[hp].absorbs.current.value
+       if absorbs + health <= maxHealth then
+        self.bar:SetValue(0)
+       else
+        self.bar:SetValue((maxHealth + absorbs) / maxHealth * maxValue)
+       end
+     else
       self.bar:SetValue((value/self.actualMaxValue)*maxValue)
+     end
     end
   end,
 
@@ -584,6 +615,7 @@ function Section:New(res,type,id) -- constructor for new sections
   local n = setmetatable({}, self)
   n.res = res -- related resource type (health/power)
   n.lvl = su.lvl
+  n.multi = su.multi or 1
   n.type = type -- prediction or gain display
   n.id = id -- spell id
   n.crit = su.crit -- crit enabled /disabled
@@ -603,17 +635,16 @@ function Section:New(res,type,id) -- constructor for new sections
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   n.bar:SetStatusBarColor(unpack(n.clr))
   n.bar:SetPoint("TOPLEFT")
-  n.bar:SetPoint("BOTTOMRIGHT")
+  if n.multi ~= 1 then
+    n.bar:SetWidth(n.directParent:GetWidth() * n.multi)
+    n.bar:SetHeight(n.directParent:GetHeight())
+  else
+    n.bar:SetPoint("BOTTOMRIGHT")
+  end
   n.bar:SetFrameStrata(lvlToStrata[n.lvl])
-  n.bar:SetMinMaxValues(0,maxValue)
+  n.bar:SetMinMaxValues(0,maxValue * n.multi)
   if id == background then
-    n.bar:SetValue(maxValue)
-  -- else
-  --   n.actualMaxValue = res == hp and UnitHealthMax(p) or UnitPowerMax(p)
-  --   if n.actualMaxValue == 0 then
-  --     n.actualMaxValue = 1
-  --   end
-  --   n.bar:SetValue((res == hp and UnitHealth(p) or UnitPower(p)) / n.actualMaxValue * maxValue)
+    n.bar:SetValue(maxValue * n.multi)
   end
   self.__index = self
   return n
@@ -625,22 +656,20 @@ end
 
 -- reacts to changes of artifact traits
 -- relevant for Soul Carver and Devour Souls
-local function UpdateArtifactTraits()
-  -- print("traits updated")
-  -- local u,e,a=UIParent,"ARTIFACT_UPDATE",C_ArtifactUI
-  --  u:UnregisterEvent(e)
-  --  SocketInventoryItem(16)
-  --  print(a.GetPowerInfo(DS))
-  --  local _,_,rank,_,bonusRank = a.GetPowerInfo(DS)
-  --  devour_souls_scalar = 1 + (rank + bonusRank) * 0.03
-  --  Invoke(hp,pre,SCa,select(3,a.GetPowerInfo(Sca)) > 0 and "Talent" or "Untalent")
-  --  a.Clear()
-  --  u:RegisterEvent(e)
+function UpdateArtifactTraits()
+  local u,e,a=UIParent,"ARTIFACT_UPDATE",C_ArtifactUI
+   u:UnregisterEvent(e)
+   SocketInventoryItem(16)
+   local _,_,rank,_,bonusRank = a.GetPowerInfo(DSPI)
+   devour_souls_scalar = 1 + (rank + bonusRank) * 0.03
+   Invoke(hp,pre,SCa,select(3,a.GetPowerInfo(SCaPI)) > 0 and "Talent" or "Untalent")
+   a.Clear()
+   u:RegisterEvent(e)
 end
 
 
 -- invokes argumentless methods of sections
-local function Invoke(res,type,id,...)
+function Invoke(res,type,id,...)
   local s = sections[res][type][id]
   if s then
     for _,func in pairs({...}) do
@@ -651,7 +680,7 @@ end
 
 
 -- reacts to talent updates
-local function UpdateTalents()
+function UpdateTalents()
   local t = select(2, GetTalentTierInfo(FoSL.row, FoSL.column )) == 1
   local func = t and "Talent" or "Untalent"
   Invoke(hp,gain,FoS,func)
@@ -718,15 +747,6 @@ local function Init()
         end
       end
     end
-
-    -- add section-unrelated event handlers
-    -- mapping[E_PEW] = UpdateArtifactTraits
-    -- mapping[E_SC] = UpdateArtifactTraits
-    -- mapping[E_PTU] = UpdateTalents
-
-    -- frame:RegisterEvent(E_PEW)
-    -- frame:RegisterEvent(E_SC)
-    -- frame:RegisterEvent(E_PTU)
 
     return function(f,e,...)
       mapping[e](e,...)
