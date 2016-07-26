@@ -597,6 +597,28 @@ local Section = {
     return b + p + n
   end,
 
+  GetAbove = function(self)
+    local above
+    for _,v in pairs(self.above) do
+      if v.enabled then
+        above = v
+        break
+      end
+    end
+    return above
+  end,
+
+  GetBelow = function(self)
+    local below
+    for _,v in pairs(self.below) do
+      if v.enabled then
+        below = v
+        break
+      end
+    end
+    return below
+  end,
+
   Accumulate = function(self)
     self.latestAccumulatedValue = self:PropagateAbove()
     local func = function(self)
@@ -607,7 +629,8 @@ local Section = {
   end,
 
   PropagateAbove = function(self)
-    return self.id ~= background and ((self.enabled and self.value or 0) + (self.above and self.above:PropagateAbove() or 0)) or 0
+    local above = self:GetAbove()
+    return self.id ~= background and ((self.enabled and self.value or 0) + (above and above:PropagateAbove() or 0)) or 0
   end,
 
   PropagateBelow = function(self,valFromAbove, func, initial)
@@ -617,8 +640,9 @@ local Section = {
         func(self)
       end
     end
-    if self.below and self.below.id ~= background then
-      self.below:PropagateBelow(self.latestAccumulatedValue, func)
+    local below = self:GetBelow()
+    if below and below.id ~= background then
+      below:PropagateBelow(self.latestAccumulatedValue, func)
     end
   end,
 
@@ -655,12 +679,14 @@ local Section = {
       for id,_ in pairs(typeTable) do
         local other = sections[self.res][type][id]
         if other.lvl == self.lvl - 1 then
-          self.below = other
+          table.insert(below, other)
         elseif other.lvl == self.lvl + 1 then
-          self.above = other
+          table.insert(above, other)
         end
       end
     end
+    self.above = above
+    self.below = below
   end,
 
   UpdateResource = function(self)
@@ -693,8 +719,8 @@ local Section = {
     UpdateAvailability = function(self,func,e,...)
       if self.enabled then
         if e == E_SUU then
-          local s = GetSpellCooldown(self.spell)
-          if s and s == 0 and not self.available then
+          local _,d = GetSpellCooldown(self.spell)
+          if d and d < 1.5 and not self.available then
             self.available = true
             if func then
               func()
