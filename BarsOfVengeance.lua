@@ -153,14 +153,32 @@ local function IterateSections(func)
   end
 end
 
-local function IsVengeance()
-  local func = GetSpecialization() == vengeance_spec_id and "Enable" or "Disable"
+local function SpecChanged()
+  local h = GetSpecialization() ~= vengeance_spec_id
   IterateSections(function(res,type,id)
     local s = sections[res][type][id]
-    if not s.havocEnabled then
-      s[func](s)
+    if h then
+      if s.bothEnabled or s.onlyHavoc then
+        s:Enable()
+      else
+        s:Disable()
+      end
+    else
+      if s.bothEnabled or not s.onlyHavoc then
+        s:Enable()
+      else
+        s:Disable()
+      end
     end
   end)
+
+  -- local func = GetSpecialization() == vengeance_spec_id and "Enable" or "Disable"
+  -- IterateSections(function(res,type,id)
+  --   local s = sections[res][type][id]
+  --   if not s.havocEnabled then
+  --     s[func](s)
+  --   end
+  -- end)
 end
 
 local otherEvents = {
@@ -182,7 +200,7 @@ local otherEvents = {
   end,
 
   PLAYER_SPECIALIZATION_CHANGED = function()
-    IsVengeance()
+    SpecChanged()
   end
 
 }
@@ -256,7 +274,7 @@ dfs = {
 
       power = {
         enabled = true,
-        havocEnabled = true,
+        bothEnabled = true,
         lvl = 6,
         clr = {1,1,0,1},
         events = {E_UPF, E_PEW},
@@ -270,7 +288,7 @@ dfs = {
     background = { -- background bar
       background = {
         enabled = true,
-        havocEnabled = true,
+        bothEnabled = true,
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200, -- width of power bars
@@ -380,7 +398,7 @@ dfs = {
 
       health = {
         enabled = true,
-        havocEnabled = true,
+        bothEnabled = true,
         lvl = 8,
         clr = {1,1,1,1},
         events = {E_UHF, E_PEW},
@@ -395,7 +413,7 @@ dfs = {
 
       background = {
         enabled = true,
-        havocEnabled = true,
+        bothEnabled = true,
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200,
@@ -421,7 +439,7 @@ dfs = {
 
       current = {
         enabled = true,
-        havocEnabled = true,
+        bothEnabled = true,
         lvl = 3,
         clr = {0,0.6,0.6,1},
         events = {E_UAAC, E_PEW},
@@ -432,7 +450,7 @@ dfs = {
 
       over = {
         enabled = true,
-        havocEnabled = true,
+        bothEnabled = true,
         lvl = 2,
         clr = {0,1,1,1},
         multi = 2
@@ -695,7 +713,7 @@ function Section:New(res,type,id) -- constructor for new sections
   n.hidePowerThreshold = su.hidePowerThreshold
   n.useClr = su.useClr or n.Clr
   n.currentClr = n.clr
-  n.havocEnabled = su.havocEnabled or false
+  n.bothEnabled = su.bothEnabled or false
   n.useClrPredicate = su.useClrPredicate
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
@@ -836,56 +854,11 @@ local function Init()
     end
   end
 
-  IsVengeance()
+  SpecChanged()
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
   IterateSections(function(res,type,id) sections[res][type][id]:SetNeighbours() end)
 
 end
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 SetupFrames()
 Init()
-
--------------------------------------------------------------------------------
