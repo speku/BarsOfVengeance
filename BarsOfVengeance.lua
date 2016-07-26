@@ -90,6 +90,7 @@ local soul_cleave_formula = function(ap) return ap * 5 end -- formula for calcul
 local soul_cleave_min_cost = 30 -- the minimal cost of Soul Cleave
 local soul_cleave_max_cost = 60 -- the maximal cost of Soul Cleave
 local soul_carver_soul_fragment_count = 5 -- how many Soul Fragments are spawned by Soul Carver
+local soul_fragment_cap = 5
 local immolation_aura_pain_per_sec = 20/6
 local immolation_aura_total_pain = 20
 local metamorphosis_pain_per_sec = 7
@@ -189,7 +190,7 @@ dfs = {
         enabled = true,
         lvl = 2, -- strata
         clr = {0,1,0,1,1}, -- color
-        events = {E_CLEU, E_SUU}, -- events that cause the related value/bar to change
+        events = {E_CLEU, E_SUU, E_PEW}, -- events that cause the related value/bar to change
         gain = immolation_aura_total_pain,
         Update = function(self,e,...) -- function to be triggered upon relevant events -> causes a change in the related sections' value
           self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
@@ -204,7 +205,7 @@ dfs = {
         lvl = 4,
         clr =
         pwrGainClr,
-        events = {E_UPF},
+        events = {E_UPF, E_PEW},
         gain = immolation_aura_pain_per_sec,
         Update = function(self,e,...)
           self:Gain()
@@ -215,7 +216,7 @@ dfs = {
         enabled = true,
         lvl = 5,
         clr = pwrGainClr,
-        events = {E_UA},
+        events = {E_UA, E_PEW},
         gain = blade_turning_total_gain,
         Update = function(self,e,...)
           self:Gain(nil,nil,true)
@@ -226,7 +227,7 @@ dfs = {
         enabled = true,
         lvl = 3,
         clr = pwrGainClr,
-        events = {E_UPF}, -- E_SUU, E_CLEU
+        events = {E_UPF, E_PEW}, -- E_SUU, E_CLEU
         gain = metamorphosis_pain_per_sec,
         Update = function(self,e,...)
           self:Gain()
@@ -240,7 +241,7 @@ dfs = {
         enabled = true,
         lvl = 6,
         clr = {1,1,0,1},
-        events = {E_UPF},
+        events = {E_UPF, E_PEW},
         Update = function(self)
           self:UpdateResource()
           self:AutoVisibility()
@@ -275,7 +276,7 @@ dfs = {
         lvl = 5,
         clr = {0,0.4,0,1},
         useClr = {0,0.6,0,1},
-        events = {E_UPF},
+        events = {E_UPF, E_PEW},
         Update = function(self)
           local power = sections[pwr].current.power.value
           if power >= soul_cleave_min_cost then
@@ -291,7 +292,7 @@ dfs = {
         lvl = 6,
         clr = {0,0.6,0,1},
         useClr = {0,1,0,1},
-        events = {E_UPF, E_CLEU},
+        events = {E_UPF, E_CLEU, E_PEW},
         healSpell = Sh,
         healCountSpell = SF,
         Update = function(self,e,...)
@@ -311,6 +312,10 @@ dfs = {
             self.value = 0
           end
         end,
+
+        useClrPredicate = function(self)
+          return self.healCount and self.healCount == soul_fragment_cap
+        end
       },
 
       [SCa] = { -- Soul Carver
@@ -319,7 +324,7 @@ dfs = {
         clr = {0.6,0,0.6,1},
         useClr = {1,0,1,1},
         crit = false,
-        events = {E_CLEU, E_SUU, E_SC},
+        events = {E_CLEU, E_SUU, E_SC, E_PEW},
         healSpell = GetSpellInfo(Sh),
         Update = function(self,e,...)
           self:UpdateAvailability(function()
@@ -329,8 +334,13 @@ dfs = {
               self.value = 0
             end
           end,e,...)
+        end,
+
+        useClrPredicate = function(self)
+          local SCl = sections[self.res][self.type][SCl]
+          return SCl.enabled and SCl.healCount and SCl.healCount + soul_carver_soul_fragment_count <= soul_fragment_cap
         end
-      }
+      },
     },
 
     [gain] = { -- definitive health gains of active buffs
@@ -340,7 +350,7 @@ dfs = {
         lvl = 7,
         crit = false,
         clr = {0.6,0.6,0.6,1},
-        events = {E_UHF},
+        events = {E_UHF, E_PEW},
         Update = function(self,e,...)
           self:Gain(true,self:GetHeal(1,nil,true))
         end
@@ -353,7 +363,7 @@ dfs = {
         enabled = true,
         lvl = 8,
         clr = {1,1,1,1},
-        events = {E_UHF},
+        events = {E_UHF, E_PEW},
         Update = function(self)
           self:UpdateResource()
           self:AutoVisibility()
@@ -392,7 +402,7 @@ dfs = {
         enabled = true,
         lvl = 3,
         clr = {0,0.6,0.6,1},
-        events = {E_UAAC},
+        events = {E_UAAC, E_PEW},
         Update = function(self)
           self.value = UnitGetTotalAbsorbs(p)
         end
@@ -448,19 +458,21 @@ local Section = {
   Talent = function(self) self:ShowBar() self.enabled = true end,
 
   Gain = function(self,total,val,absolute) -- used for guaranteed buff gainsw
-    local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
-    if buffed then
-      local remaining = expirationTime - GetTime()
-      if absolute then
-        self.value = self.gain
-        print(self.value)
-      elseif total then
-        self.value = remaining / duration * (val and val or self.gain)
+    if self.enabled then
+      local buffed,_,_,_,_,duration,expirationTime = UnitBuff(p, self.spell)
+      if buffed then
+        local remaining = expirationTime - GetTime()
+        if absolute then
+          self.value = self.gain
+          print(self.value)
+        elseif total then
+          self.value = remaining / duration * (val and val or self.gain)
+        else
+          self.value = remaining * self.gain
+        end
       else
-        self.value = remaining * self.gain
+        self.value = 0
       end
-    else
-      self.value = 0
     end
   end,
 
@@ -470,12 +482,14 @@ local Section = {
   end,
 
   GetHeal = function(self, baseMulti, additiveHeal, forGain) -- resulting heal of next spell cast (prediction)
-    local h1,h2 = GetSpellDescription(self.healSpell):match("(%d+),(%d+)")
-    local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit()
-    if forGain then
-      return res
-    else
-      self.value = res
+    if self.enabled then
+      local h1,h2 = GetSpellDescription(self.healSpell):match("(%d+),(%d+)")
+      local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit()
+      if forGain then
+        return res
+      else
+        self.value = res
+      end
     end
   end,
 
@@ -549,29 +563,34 @@ local Section = {
   end,
 
   UpdateResource = function(self)
-      local isPwr = self.res == pwr
-      self.value = isPwr and UnitPower(p) or UnitHealth(p)
-      local newMax = isPwr and UnitPowerMax(p) or UnitHealthMax(p)
-      if newMax ~= self.actualMaxValue then
-        self:SetMaxValue(newMax)
-        for type, typeTable in pairs(sections[self.res]) do
-          for id, idTable in pairs(typeTable) do
-            sections[self.res][type][id]:SetMaxValue(newMax)
+    if self.enabled then
+        local isPwr = self.res == pwr
+        self.value = isPwr and UnitPower(p) or UnitHealth(p)
+        local newMax = isPwr and UnitPowerMax(p) or UnitHealthMax(p)
+        if newMax ~= self.actualMaxValue then
+          self:SetMaxValue(newMax)
+          for type, typeTable in pairs(sections[self.res]) do
+            for id, idTable in pairs(typeTable) do
+              sections[self.res][type][id]:SetMaxValue(newMax)
+            end
           end
         end
       end
     end,
 
     UpdateAura = function(self,...)
-      local e =  select(2,...)
-      if self.type == pre and doseAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.healCountSpell then
-        self.healCount = doseAuraEvents[e](16,...)
+      if self.enabled then
+        local e =  select(2,...)
+        if self.type == pre and doseAuraEvents[e] and select(4,...) == UnitGUID(p) and select(13,...) == self.healCountSpell then
+          self.healCount = doseAuraEvents[e](16,...)
+        end
       end
     end,
 
     -- keeps track of spell availability and calls its function parameter upon
     -- availability change
     UpdateAvailability = function(self,func,e,...)
+      if self.enabled then
         if e == E_SUU then
           local s = GetSpellCooldown(self.spell)
           if s and s == 0 and not self.available then
@@ -588,6 +607,7 @@ local Section = {
             end
           end
         end
+      end
     end,
 
     AutoVisibility = function(self,pew)
@@ -606,6 +626,22 @@ local Section = {
             end
           end
         end
+    end,
+
+    UpdateColor = function(self)
+     if self.enabled then
+       if self.useClr and self.useClrPredicate then
+         if self:useClrPredicate() then
+          if self.currentClr ~= self.useClr then
+             self.bar:SetStatusBarColor(unpack(self.useClr))
+             self.currentClr = self.useClr
+           end
+         elseif self.currentClr ~= self.clr then
+           self.bar:SetStatusBarColor(unpack(self.clr))
+           self.currentClr = self.clr
+         end
+       end
+     end
     end
 }
 
@@ -613,6 +649,7 @@ function Section:New(res,type,id) -- constructor for new sections
   local su = BarsOfVengeanceUserSettings[res][type][id]
   local sd = dfs[res][type][id]
   local n = setmetatable({}, self)
+  n.enabled = su.enabled or true
   n.res = res -- related resource type (health/power)
   n.lvl = su.lvl
   n.multi = su.multi or 1
@@ -631,6 +668,8 @@ function Section:New(res,type,id) -- constructor for new sections
   n.hideHealthThreshold = su.hideHealthThreshold
   n.hidePowerThreshold = su.hidePowerThreshold
   n.useClr = su.useClr or n.Clr
+  n.currentClr = n.clr
+  n.useClrPredicate = su.useClrPredicate
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   n.bar:SetStatusBarColor(unpack(n.clr))
@@ -721,6 +760,7 @@ local function Init()
     section.Update = function(section,...)
       u(section,...)
       section:Accumulate()
+      section:UpdateColor()
     end
   end
 
