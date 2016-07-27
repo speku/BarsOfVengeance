@@ -22,6 +22,7 @@ local DB = 162243 -- Demon's Bite
 local Pp = 203650 -- Prepared
 local VR = 198793 -- Vengeful Retreat
 local FB = 213241 -- Felblade
+local FR = 195072 -- Fel Rush
 -------------------------------------------------------------------------------
 
 
@@ -108,6 +109,7 @@ local vengeance_spec_id = 2
 local demons_bite_max_fury = 30
 local demons_bite_min_fury = 20
 local prepared_fury_per_sec = 40 / 5
+local prepared_fury_per_tic = 8
 local prepared_total_fury = 40
 local felblade_pain = 20
 local felblade_fury = 30
@@ -313,12 +315,18 @@ dfs = {
         enabled = true,
         onlyHavoc = true,
         lvl = 3, -- strata
-        clr = {0,0.6,0,1}, -- color
+        clr = {0,0.4,0,1}, -- color
+        useClr = {0,0.6,0,1},
         events = {E_CLEU, E_PEW},
         gain = prepared_total_fury,
         Update = function(self,e,...)
           self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
-        end
+        end,
+        useClrPredicate = function(self)
+          local p = sections[pwr].current.power
+          local fb = sections[pwr][pre][FB]
+          return (fb and fb.enabled and fb.available or GetSpellCharges(FR) > 0) and p.value + (fb and fb.enabled and fb.available and fb.value or 0) + prepared_fury_per_tic <= p.actualMaxValue
+        end,
       }
     },
 
