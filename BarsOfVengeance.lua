@@ -65,6 +65,7 @@ local pwrYOffset = "pwrYOffset"
 local background = "background"
 local center = "CENTER"
 local over = "over"
+local CLASS_ID = 12
 --------------------------------------------------------------------------------
 
 
@@ -1041,5 +1042,7 @@ local function Init()
 
 end
 
-SetupFrames()
-Init()
+if select(3,UnitClass(p)) == CLASS_ID then
+  SetupFrames()
+  Init()
+end
