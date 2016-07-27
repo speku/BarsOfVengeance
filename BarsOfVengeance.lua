@@ -107,7 +107,7 @@ local maxValue = 5000000
 local vengeance_spec_id = 2
 local demons_bite_max_fury = 30
 local demons_bite_min_fury = 20
-local prepared_fury_per_sec = 8
+local prepared_fury_per_sec = 40 / 5
 local prepared_total_fury = 40
 local felblade_pain = 20
 local felblade_fury = 30
@@ -209,6 +209,8 @@ local otherEvents = {
   PLAYER_ENTERING_WORLD = function(self)
     self:UpdateResource()
     self:AutoVisibility(true)
+    UpdateArtifactTraits()
+    UpdateTalents()
   end,
 
   PLAYER_REGEN_DISABLED = function(self)
@@ -225,6 +227,15 @@ local otherEvents = {
 
   PLAYER_SPECIALIZATION_CHANGED = function()
     SpecChanged()
+    UpdateTalents()
+  end,
+
+  SPELLS_CHANGED = function()
+    UpdateArtifactTraits()
+  end,
+
+  PLAYER_TALENT_UPDATE = function()
+    UpdateTalents()
   end
 
 }
@@ -248,7 +259,7 @@ dfs = {
       [IA] = { -- Immolation Aura
         enabled = true,
         lvl = 3, -- strata
-        clr = {0,1,0,1,1}, -- color
+        clr = {0,0.6,0,1}, -- color
         events = {E_CLEU, E_SUU, E_PEW}, -- events that cause the related value/bar to change
         gain = immolation_aura_total_pain,
         Update = function(self,e,...) -- function to be triggered upon relevant events -> causes a change in the related sections' value
@@ -256,25 +267,33 @@ dfs = {
         end
       },
 
-      [DB] = { -- Demon's Bite
-        enabled = true,
-        onlyHavoc = true,
-        lvl = 5,
-        clr = pwrGainClr,
-        events = {E_UPF, E_PEW},
-        Update = function(self,e,...)
-          self.value = demons_bite_max_fury
-        end
-      },
+      -- [DB] = { -- Demon's Bite
+      --   enabled = true,
+      --   onlyHavoc = true,
+      --   lvl = 5,
+      --   clr = pwrGainClr,
+      --   events = {E_UPF, E_PEW},
+      --   Update = function(self,e,...)
+      --     self.value = demons_bite_max_fury
+      --   end
+      -- },
 
       [FB] = { -- Felblade
         enabled = true,
         bothEnabled = true,
         lvl = 2,
-        clr = {1,0,1,1},
+        clr = {0.6,0,0.6,1},
+        useClr = {1,0,1,1},
         events = {E_CLEU, E_SUU, E_PEW},
         Update = function(self,e,...)
           self:UpdateAvailability(function() self.value = self.available and (isVengeance and felblade_pain or felblade_fury) or 0 end,e,...)
+        end,
+        useClrPredicate = function(self)
+          local p = sections[pwr].current.power
+          return p.value + self.value <= p.actualMaxValue
+        end,
+        onTalentUpdate = function(self)
+          self.value = self.available and (isVengeance and felblade_pain or felblade_fury) or 0
         end
       },
 
@@ -282,7 +301,7 @@ dfs = {
         enabled = true,
         onlyHavoc = true,
         lvl = 3, -- strata
-        clr = {0,1,0,1}, -- color
+        clr = {0,0.6,0,1}, -- color
         events = {E_CLEU, E_SUU, E_PEW},
         gain = prepared_total_fury,
         Update = function(self,e,...)
@@ -308,7 +327,7 @@ dfs = {
         enabled = true,
         onlyHavoc = true,
         lvl = 4,
-        clr = {0.4,0.4,0,1},
+        clr = pwrGainClr,
         events = {E_UPF, E_PEW},
         gain = prepared_fury_per_sec,
         Update = function(self,e,...)
@@ -390,6 +409,11 @@ dfs = {
           else
             self.value = 0
           end
+        end,
+
+        useClrPredicate = function(self)
+          local sc = sections[hp][pre][SCl]
+          return sc.enabled and sc.healCount and sc.healCount == soul_fragment_cap
         end
       },
 
@@ -492,10 +516,6 @@ dfs = {
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
         events = {E_PEW, E_PRE, E_PRD, E_PTU, E_SC, E_PSC},
         Update = function(self,e,...)
-          if e == E_PEW or e == E_SC or E_PTU then
-            UpdateArtifactTraits()
-            UpdateTalents()
-          end
           triggerOther(self,e,...)
         end
       },
@@ -538,7 +558,7 @@ sections = {
   [pwr] = {[pre] = {}, [gain] = {}, current = {}, background = {}},
 }
 -------------------------------------------------------------------------------
-local DBCounter = 0
+
 
 ------------------------ structures --------------------------------------------
 
@@ -629,12 +649,14 @@ local Section = {
   end,
 
   Accumulate = function(self)
-    self.latestAccumulatedValue = self:PropagateAbove()
-    local func = function(self)
-      self:SetBarValue(self.latestAccumulatedValue)
+    if self.enabled then
+      self.latestAccumulatedValue = self:PropagateAbove()
+      local func = function(self)
+        self:SetBarValue(self.latestAccumulatedValue)
+      end
+      func(self)
+      self:PropagateBelow(0, func, true,self)
     end
-    func(self)
-    self:PropagateBelow(0, func, true)
   end,
 
   PropagateAbove = function(self)
@@ -642,17 +664,19 @@ local Section = {
     return self.id ~= background and ((self.enabled and self.value or 0) + (above and above:PropagateAbove() or 0)) or 0
   end,
 
-  PropagateBelow = function(self,valFromAbove, func, initial)
-
+  PropagateBelow = function(self,valFromAbove, func, initial,from)
     if not initial then
       self.latestAccumulatedValue = valFromAbove + (self.enabled and self.value or 0)
       if func then
         func(self)
       end
     end
+
+    self:UpdateColor()
     local below = self:GetBelow()
+
     if below and below.id ~= background then
-      below:PropagateBelow(self.latestAccumulatedValue, func)
+      below:PropagateBelow(self.latestAccumulatedValue, func,nil,self)
     end
   end,
 
@@ -733,6 +757,9 @@ local Section = {
     UpdateAvailability = function(self,func,e,...)
       if self.enabled and self.spell then
         if e == E_SUU then
+          if self.id == VR then
+            print(GetSpellCooldown(self.spell))
+          end
           local _,d = GetSpellCooldown(self.spell)
           if d and d < 1.5 and not self.available then
             self.available = true
@@ -814,6 +841,7 @@ function Section:New(res,type,id) -- constructor for new sections
   n.useClr = su.useClr or n.Clr
   n.currentClr = n.clr
   n.useClrPredicate = su.useClrPredicate
+  n.onTalentUpdate = su.onTalentUpdate
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   n.bar:SetStatusBarColor(unpack(n.clr))
@@ -863,7 +891,7 @@ end
 
 
 -- reacts to talent updates
-function UpdateTalents()
+function UpdateTalents(refreshFunc)
   local l = isVengeance and FoSL or PpL
   local t = select(2, GetTalentTierInfo(l.row, l.column)) == 1
   local fb = select(2, GetTalentTierInfo(FBL.row, FBL.column)) == 1
@@ -877,6 +905,13 @@ function UpdateTalents()
     Invoke(pwr,pre,VR,func)
   end
   Invoke(pwr,pre,FB,fbFunc)
+
+  IterateSections(function(res,type,id)
+    local s = sections[res][type][id]
+    if s.onTalentUpdate then
+      s:onTalentUpdate()
+    end
+  end)
 end
 
 
@@ -913,7 +948,6 @@ local function Init()
     section.Update = function(section,...)
       u(section,...)
       section:Accumulate()
-      section:UpdateColor()
     end
   end
 
