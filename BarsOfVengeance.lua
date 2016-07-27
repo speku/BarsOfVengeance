@@ -111,6 +111,8 @@ local prepared_fury_per_sec = 40 / 5
 local prepared_total_fury = 40
 local felblade_pain = 20
 local felblade_fury = 30
+local update_interval = 0.2
+local vengeful_retreat_cd = 15
 
 -- maps integers to layers
 local lvlToStrata = {
@@ -141,7 +143,17 @@ local UpdateArtifactTraits
 local Invoke
 
 --------------------------------------------------------------------------------
+local onCD = {}
+local onCDFuncs = {
+  [VR] = function()
+    local s = sections[pwr][pre][VR]
+    s.available = true
+    s.value = s.gain
+  end,
+}
+
 local function selector(n,...) return select(n,...) end
+
 local doseAuraEvents = {
   SPELL_AURA_APPLIED = function() return 1 end,
   SPELL_AURA_REMOVED = function() return 0 end,
@@ -207,6 +219,7 @@ end
 
 local otherEvents = {
   PLAYER_ENTERING_WORLD = function(self)
+    onCD[VR] = 0
     self:UpdateResource()
     self:AutoVisibility(true)
     UpdateArtifactTraits()
@@ -236,8 +249,7 @@ local otherEvents = {
 
   PLAYER_TALENT_UPDATE = function()
     UpdateTalents()
-  end
-
+  end,
 }
 
 local function triggerOther(self,e,...)
@@ -302,7 +314,7 @@ dfs = {
         onlyHavoc = true,
         lvl = 3, -- strata
         clr = {0,0.6,0,1}, -- color
-        events = {E_CLEU, E_SUU, E_PEW},
+        events = {E_CLEU, E_PEW},
         gain = prepared_total_fury,
         Update = function(self,e,...)
           self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
@@ -655,7 +667,7 @@ local Section = {
         self:SetBarValue(self.latestAccumulatedValue)
       end
       func(self)
-      self:PropagateBelow(0, func, true,self)
+      self:PropagateBelow(0, func, true)
     end
   end,
 
@@ -664,7 +676,7 @@ local Section = {
     return self.id ~= background and ((self.enabled and self.value or 0) + (above and above:PropagateAbove() or 0)) or 0
   end,
 
-  PropagateBelow = function(self,valFromAbove, func, initial,from)
+  PropagateBelow = function(self,valFromAbove, func, initial)
     if not initial then
       self.latestAccumulatedValue = valFromAbove + (self.enabled and self.value or 0)
       if func then
@@ -757,9 +769,6 @@ local Section = {
     UpdateAvailability = function(self,func,e,...)
       if self.enabled and self.spell then
         if e == E_SUU then
-          if self.id == VR then
-            print(GetSpellCooldown(self.spell))
-          end
           local _,d = GetSpellCooldown(self.spell)
           if d and d < 1.5 and not self.available then
             self.available = true
@@ -772,6 +781,9 @@ local Section = {
             self.available = false
             if func then
               func()
+            end
+            if self.id == VR then
+               onCD[self.id] = GetTime() + vengeful_retreat_cd -- is it common that abilities that aren't affected by the gcd can't be queried for their cd when this event is fired?
             end
           end
         end
@@ -998,6 +1010,25 @@ local function Init()
 
   SpecChanged()
   frame:SetScript("OnEvent", CreateEventHandler(frame,eventHandlers))
+
+  local sinceUpdate = 0
+  frame:SetScript("OnUpdate", function(self,elapsed)
+    sinceUpdate = sinceUpdate + elapsed
+    if sinceUpdate >= update_interval then
+      sinceUpdate = 0
+        local toDelete = {}
+        for id,expirationTime in pairs(onCD) do
+          if expirationTime and expirationTime <= GetTime() then
+            onCDFuncs[id]()
+            table.insert(toDelete, id)
+          end
+        end
+        for _,id in ipairs(toDelete) do
+          onCD[id] = nil
+        end
+    end
+    end)
+
   IterateSections(function(res,type,id) sections[res][type][id]:SetNeighbours() end)
 
 end
