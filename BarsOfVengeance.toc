@@ -1,4 +1,4 @@
-## Interface: 60200
+## Interface: 70000
 ## Title: BarsOfVengeance
 ## Notes: Predictive health and pain bars for Vengeance Demon Hunters
 ## Author: speku

@@ -403,7 +403,7 @@ dfs = {
         h = 15, -- height of power bars
         x = 0, -- x-offset of power bars from the addons' parent frame
         y = -170, -- equivalent y-offset
-        sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga", -- status bar texture used for power bars
+        sbt = "Interface\\AddOns\\BarsOfVengeance\\media\\texture.tga", -- status bar texture used for power bars
         events = {E_PEW, E_PRE, E_PRD},
         Update = function(self,e,...)
           triggerOther(self,e,...)
@@ -533,7 +533,7 @@ dfs = {
         h = 15,
         x = 0,
         y = -150,
-        sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
+        sbt = "Interface\\AddOns\\BarsOfVengeance\\media\\texture.tga",
         events = {E_PEW, E_PRE, E_PRD, E_PTU, E_SC, E_PSC},
         Update = function(self,e,...)
           triggerOther(self,e,...)
@@ -633,7 +633,7 @@ local Section = {
 
   GetHeal = function(self, baseMulti, additiveHeal, forGain) -- resulting heal of next spell cast (prediction)
     if self.enabled then
-      local h1,h2 = GetSpellDescription(self.healSpell):match("(%d+),(%d+)")
+      local h1,h2 = GetSpellDescription(self.healSpell):match("(%d+)%p(%d+)")
       local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit()
       if forGain then
         return res
