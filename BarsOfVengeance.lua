@@ -156,6 +156,25 @@ local absoluteAuraEvents = {
 }
 
 
+local function filter(table, predicate)
+  local res = {}
+  for _,v in pairs(table) do
+    if predicate(v) then
+      tinsert(res,v)
+    end
+  end
+  return res
+end
+
+
+local function map(table, func)
+  local res = {}
+  for _,v in pairs(table) do
+    tinsert(res, func(v))
+  end
+  return res
+end
+
 local function IterateSections(func)
   for res,resTable in pairs(sections) do
     for type,typeTable in pairs(resTable) do
@@ -172,18 +191,14 @@ local function SpecChanged()
     local s = sections[res][type][id]
     if not isVengeance then
       if s.bothEnabled or s.onlyHavoc then
-        print("not vengeance", "enable", s.spell)
         s:Enable()
       else
         s:Disable()
-        print("not vengeance", "disable", s.spell)
       end
     else
       if s.bothEnabled or not s.onlyHavoc then
-        print("vengeance", "enable", s.spell)
         s:Enable()
       else
-        print("disabled", s.spell)
         s:Disable()
       end
     end
@@ -241,6 +256,17 @@ dfs = {
         end
       },
 
+      [DB] = { -- Demon's Bite
+        enabled = true,
+        onlyHavoc = true,
+        lvl = 5,
+        clr = pwrGainClr,
+        events = {E_UPF, E_PEW},
+        Update = function(self,e,...)
+          self.value = demons_bite_max_fury
+        end
+      },
+
       [FB] = { -- Felblade
         enabled = true,
         bothEnabled = true,
@@ -256,7 +282,7 @@ dfs = {
         enabled = true,
         onlyHavoc = true,
         lvl = 3, -- strata
-        clr = {0,1,0,1,1}, -- color
+        clr = {0,1,0,1}, -- color
         events = {E_CLEU, E_SUU, E_PEW},
         gain = prepared_total_fury,
         Update = function(self,e,...)
@@ -275,18 +301,6 @@ dfs = {
         gain = immolation_aura_pain_per_sec,
         Update = function(self,e,...)
           self:Gain()
-        end
-      },
-
-      [DB] = { -- Demon's Bite
-        enabled = true,
-        onlyHavoc = true,
-        lvl = 5,
-        clr = pwrGainClr,
-        events = {E_UPF, E_PEW},
-        gain = demons_bite_max_fury,
-        Update = function(self,e,...)
-          self.value = self.gain
         end
       },
 
@@ -478,14 +492,11 @@ dfs = {
         sbt = "Interface\\AddOns\\VengeanceBars\\media\\texture.tga",
         events = {E_PEW, E_PRE, E_PRD, E_PTU, E_SC, E_PSC},
         Update = function(self,e,...)
-          if e == E_PTU then
+          if e == E_PEW or e == E_SC or E_PTU then
+            UpdateArtifactTraits()
             UpdateTalents()
-          else
-            if e == E_PEW or e == E_SC then
-              UpdateArtifactTraits()
-            end
-            triggerOther(self,e,...)
           end
+          triggerOther(self,e,...)
         end
       },
     },
@@ -527,7 +538,7 @@ sections = {
   [pwr] = {[pre] = {}, [gain] = {}, current = {}, background = {}},
 }
 -------------------------------------------------------------------------------
-
+local DBCounter = 0
 
 ------------------------ structures --------------------------------------------
 
@@ -598,25 +609,23 @@ local Section = {
   end,
 
   GetAbove = function(self)
-    local above
-    for _,v in pairs(self.above) do
-      if v.enabled then
-        above = v
-        break
+    if self.above then
+      for _,v in ipairs(self.above) do
+        if v.enabled then
+          return v
+        end
       end
     end
-    return above
   end,
 
   GetBelow = function(self)
-    local below
-    for _,v in pairs(self.below) do
-      if v.enabled then
-        below = v
-        break
+    if self.below then
+      for _,v in ipairs(self.below) do
+        if v.enabled then
+          return v
+        end
       end
     end
-    return below
   end,
 
   Accumulate = function(self)
@@ -634,6 +643,7 @@ local Section = {
   end,
 
   PropagateBelow = function(self,valFromAbove, func, initial)
+
     if not initial then
       self.latestAccumulatedValue = valFromAbove + (self.enabled and self.value or 0)
       if func then
@@ -678,13 +688,17 @@ local Section = {
     for type, typeTable in pairs(sections[self.res]) do
       for id,_ in pairs(typeTable) do
         local other = sections[self.res][type][id]
-        if other.lvl == self.lvl - 1 then
+        if other.lvl < self.lvl then
           table.insert(below, other)
-        elseif other.lvl == self.lvl + 1 then
+        elseif other.lvl > self.lvl then
           table.insert(above, other)
         end
       end
     end
+
+    table.sort(below, function(s1,s2) return s1.lvl > s2.lvl end)
+    table.sort(above, function(s1,s2) return s1.lvl < s2.lvl end)
+
     self.above = above
     self.below = below
   end,
@@ -717,7 +731,7 @@ local Section = {
     -- keeps track of spell availability and calls its function parameter upon
     -- availability change
     UpdateAvailability = function(self,func,e,...)
-      if self.enabled then
+      if self.enabled and self.spell then
         if e == E_SUU then
           local _,d = GetSpellCooldown(self.spell)
           if d and d < 1.5 and not self.available then
@@ -781,6 +795,7 @@ function Section:New(res,type,id) -- constructor for new sections
   n.onlyHavoc = su.onlyHavoc
   n.res = res -- related resource type (health/power)
   n.lvl = su.lvl
+  n.value = su.value or 0
   n.multi = su.multi or 1
   n.type = type -- prediction or gain display
   n.id = id -- spell id
@@ -849,7 +864,8 @@ end
 
 -- reacts to talent updates
 function UpdateTalents()
-  local t = select(2, isVengeance and GetTalentTierInfo(FoSL.row, FoSL.column ) or GetTalentTierInfo(PpL.row, PpL.column )) == 1
+  local l = isVengeance and FoSL or PpL
+  local t = select(2, GetTalentTierInfo(l.row, l.column)) == 1
   local fb = select(2, GetTalentTierInfo(FBL.row, FBL.column)) == 1
   local func = t and "Enable" or "Disable"
   local fbFunc = fb and "Enable" or "Disable"
@@ -860,7 +876,7 @@ function UpdateTalents()
     Invoke(pwr,gain,VR,func)
     Invoke(pwr,pre,VR,func)
   end
-  Invoke(hp,pre,FoS,fbFunc)
+  Invoke(pwr,pre,FB,fbFunc)
 end
 
 
