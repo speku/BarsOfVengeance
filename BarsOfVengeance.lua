@@ -23,6 +23,8 @@ local Pp = 203650 -- Prepared
 local VR = 198793 -- Vengeful Retreat
 local FB = 213241 -- Felblade
 local FR = 195072 -- Fel Rush
+local FM = 192939 -- Fel Mastery
+local Mo = 206476 -- Momentum
 -------------------------------------------------------------------------------
 
 
@@ -82,6 +84,7 @@ local E_UPF = "UNIT_POWER_FREQUENT"
 local E_PRD = "PLAYER_REGEN_DISABLED"
 local E_PRE = "PLAYER_REGEN_ENABLED"
 local E_PSC = "PLAYER_SPECIALIZATION_CHANGED"
+local E_SUC = "SPELL_UPDATE_CHARGES"
 --------------------------------------------------------------------------------
 
 
@@ -95,6 +98,7 @@ local isVengeance = true
 local FoSL = {row = 2, column = 1} -- Feast of Souls location in talent pane
 local PpL = {row = 2, column = 1} -- Prepared location
 local FBL = {row = 3, column = 1} -- Felblade location
+local FML = {row = 1, column = 1} -- Fel Mastery location
 local devour_souls_scalar = 1 -- Devour Souls scalar
 local soul_cleave_formula = function(ap) return ap * 5 end -- formula for calculating the minimal heal of Soul Cleave
 local soul_cleave_min_cost = 30 -- the minimal cost of Soul Cleave
@@ -116,6 +120,7 @@ local felblade_pain = 20
 local felblade_fury = 30
 local update_interval = 0.2
 local vengeful_retreat_cd = 15
+local fel_mastery_fury = 25
 
 -- maps integers to layers
 local lvlToStrata = {
@@ -273,13 +278,33 @@ dfs = {
 
       [IA] = { -- Immolation Aura
         enabled = true,
-        lvl = 3, -- strata
+        lvl = 4, -- strata
         clr = {0,0.6,0,1}, -- color
         events = {E_CLEU, E_SUU, E_PEW}, -- events that cause the related value/bar to change
         gain = immolation_aura_total_pain,
         Update = function(self,e,...) -- function to be triggered upon relevant events -> causes a change in the related sections' value
           self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
         end
+      },
+
+      [FM] = { -- Fel Mastery
+        enabled = true,
+        onlyHavoc = true,
+        lvl = 2,
+        clr = {0,0.4,0.4,1},
+        useClr = {0,1,1,1},
+        -- events = {E_CLEU, E_SUU, E_PEW},
+        events = {E_SUC, E_PEW},
+        gain = fel_mastery_fury,
+        auxSpells = {Mo},
+        Update = function(self,e,...)
+          self.value = GetSpellCharges(FR) > 0 and self.gain or 0
+        end,
+        useClrPredicate = function(self)
+          local charges, maxCharges = GetSpellCharges(FR)
+          local pow = sections[pwr].current.power
+          return pow.value + self.value <= pow.actualMaxValue and not UnitBuff(p,self.auxSpells[Mo]) and (charges < maxCharges and {0,0.6,0.6,1} or true)
+        end,
       },
 
       -- [DB] = { -- Demon's Bite
@@ -296,7 +321,7 @@ dfs = {
       [FB] = { -- Felblade
         enabled = true,
         bothEnabled = true,
-        lvl = 2,
+        lvl = 3,
         clr = {0.6,0,0.6,1},
         useClr = {1,0,1,1},
         events = {E_CLEU, E_SUU, E_PEW},
@@ -315,18 +340,19 @@ dfs = {
       [VR] = { -- Vengeful Retreat
         enabled = true,
         onlyHavoc = true,
-        lvl = 3, -- strata
+        lvl = 4, -- strata
         clr = {0,0.4,0,1}, -- color
         useClr = {0,0.6,0,1},
         events = {E_CLEU, E_PEW},
         gain = prepared_total_fury,
+        auxSpells = {Mo},
         Update = function(self,e,...)
           self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
         end,
         useClrPredicate = function(self)
-          local p = sections[pwr].current.power
+          local pow = sections[pwr].current.power
           local fb = sections[pwr][pre][FB]
-          return (fb and fb.enabled and fb.available or GetSpellCharges(FR) > 0) and p.value + (fb and fb.enabled and fb.available and fb.value or 0) + prepared_fury_per_tic <= p.actualMaxValue
+          return (fb and fb.enabled and fb.available or GetSpellCharges(FR) > 0) and pow.value + (fb and fb.enabled and fb.available and fb.value or 0) + prepared_fury_per_tic <= pow.actualMaxValue and not UnitBuff(p,self.auxSpells[Mo])
         end,
       }
     },
@@ -347,7 +373,7 @@ dfs = {
       [Pp] = { -- Prepared
         enabled = true,
         onlyHavoc = true,
-        lvl = 4,
+        lvl = 5,
         clr = pwrGainClr,
         events = {E_UPF, E_PEW},
         gain = prepared_fury_per_sec,
@@ -818,19 +844,29 @@ local Section = {
     end,
 
     UpdateColor = function(self)
-     if self.enabled then
-       if self.useClr and self.useClrPredicate then
-         if self:useClrPredicate() then
-          if self.currentClr ~= self.useClr then
-             self.bar:SetStatusBarColor(unpack(self.useClr))
-             self.currentClr = self.useClr
-           end
-         elseif self.currentClr ~= self.clr then
-           self.bar:SetStatusBarColor(unpack(self.clr))
-           self.currentClr = self.clr
-         end
-       end
-     end
+      if self.useClr and self.useClrPredicate then
+        local u = self:useClrPredicate()
+        if type(u) == "table" then
+          self.bar:SetStatusBarColor(unpack(u))
+        elseif u then
+          self.bar:SetStatusBarColor(unpack(self.useClr))
+        else
+          self.bar:SetStatusBarColor(unpack(self.clr))
+        end
+      end
+    --  if self.enabled then
+    --    if self.useClr and self.useClrPredicate then
+    --      if self:useClrPredicate() then
+    --       if self.currentClr ~= self.useClr then
+    --          self.bar:SetStatusBarColor(unpack(self.useClr))
+    --          self.currentClr = self.useClr
+    --        end
+    --      elseif self.currentClr ~= self.clr then
+    --        self.bar:SetStatusBarColor(unpack(self.clr))
+    --        self.currentClr = self.clr
+    --      end
+    --    end
+    --  end
     end
 }
 
@@ -863,6 +899,14 @@ function Section:New(res,type,id) -- constructor for new sections
   n.currentClr = n.clr
   n.useClrPredicate = su.useClrPredicate
   n.onTalentUpdate = su.onTalentUpdate
+
+  if su.auxSpells then
+    n.auxSpells = {}
+    for _,v in pairs(su.auxSpells) do
+      n.auxSpells[v] = GetSpellInfo(v)
+    end
+  end
+
   n.bar = CreateFrame("StatusBar",nil,n.directParent) -- the related status bar
   n.bar:SetStatusBarTexture(BarsOfVengeanceUserSettings[res].background.background.sbt)
   n.bar:SetStatusBarColor(unpack(n.clr))
@@ -913,19 +957,34 @@ end
 
 -- reacts to talent updates
 function UpdateTalents(refreshFunc)
-  local l = isVengeance and FoSL or PpL
-  local t = select(2, GetTalentTierInfo(l.row, l.column)) == 1
-  local fb = select(2, GetTalentTierInfo(FBL.row, FBL.column)) == 1
-  local func = t and "Enable" or "Disable"
-  local fbFunc = fb and "Enable" or "Disable"
-  if isVengeance then
-    Invoke(hp,gain,FoS,func)
-    Invoke(hp,pre,FoS,func)
-  else
-    Invoke(pwr,gain,VR,func)
-    Invoke(pwr,pre,VR,func)
+  local function core(l,res,type,id)
+    local f = select(2, GetTalentTierInfo(l.row, l.column)) == 1 and "Enable" or "Disable"
+    Invoke(res,type,id,f)
   end
-  Invoke(pwr,pre,FB,fbFunc)
+
+  if isVengeance then
+    core(FoSL,hp,gain,FoS)
+    core(FoSL,hp,pre,FoS)
+  else
+    core(PpL,pwr,pre,VR)
+    core(PpL,pwr,gain,Pp)
+    core(FML,pwr,pre,FM)
+  end
+  core(FBL,pwr,pre,FB)
+
+  -- local l = isVengeance and FoSL or PpL
+  -- local t = select(2, GetTalentTierInfo(l.row, l.column)) == 1
+  -- local fb = select(2, GetTalentTierInfo(FBL.row, FBL.column)) == 1
+  -- local func = t and "Enable" or "Disable"
+  -- local fbFunc = fb and "Enable" or "Disable"
+  -- if isVengeance then
+  --   Invoke(hp,gain,FoS,func)
+  --   Invoke(hp,pre,FoS,func)
+  -- else
+  --   Invoke(pwr,gain,VR,func)
+  --   Invoke(pwr,pre,VR,func)
+  -- end
+  -- Invoke(pwr,pre,FB,fbFunc)
 
   IterateSections(function(res,type,id)
     local s = sections[res][type][id]
