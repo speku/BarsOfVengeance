@@ -25,6 +25,7 @@ local FB = 213241 -- Felblade
 local FR = 195072 -- Fel Rush
 local FM = 192939 -- Fel Mastery
 local Mo = 206476 -- Momentum
+local FD = 212084 -- Fel Devastation
 -------------------------------------------------------------------------------
 
 
@@ -85,6 +86,9 @@ local E_PRD = "PLAYER_REGEN_DISABLED"
 local E_PRE = "PLAYER_REGEN_ENABLED"
 local E_PSC = "PLAYER_SPECIALIZATION_CHANGED"
 local E_SUC = "SPELL_UPDATE_CHARGES"
+local E_USCSA = "UNIT_SPELLCAST_CHANNEL_START"
+local E_USCSO = "UNIT_SPELLCAST_CHANNEL_STOP"
+local E_USCU = "UNIT_SPELLCAST_CHANNEL_UPDATE"
 --------------------------------------------------------------------------------
 
 
@@ -99,6 +103,7 @@ local FoSL = {row = 2, column = 1} -- Feast of Souls location in talent pane
 local PpL = {row = 2, column = 1} -- Prepared location
 local FBL = {row = 3, column = 1} -- Felblade location
 local FML = {row = 1, column = 1} -- Fel Mastery location
+local FDL = {row = 6, column = 1} -- Fel Devastation location
 local devour_souls_scalar = 1 -- Devour Souls scalar
 local soul_cleave_formula = function(ap) return ap * 5 end -- formula for calculating the minimal heal of Soul Cleave
 local soul_cleave_min_cost = 30 -- the minimal cost of Soul Cleave
@@ -121,6 +126,7 @@ local felblade_fury = 30
 local update_interval = 0.2
 local vengeful_retreat_cd = 15
 local fel_mastery_fury = 25
+local fel_devastation_pain_cost = 30
 
 -- maps integers to layers
 local lvlToStrata = {
@@ -278,7 +284,7 @@ dfs = {
 
       [IA] = { -- Immolation Aura
         enabled = true,
-        lvl = 6, -- strata
+        lvl = 9, -- strata
         clr = {0,0.6,0,1}, -- color
         events = {E_CLEU, E_SUU, E_PEW}, -- events that cause the related value/bar to change
         gain = immolation_aura_total_pain,
@@ -290,7 +296,7 @@ dfs = {
       [FM] = { -- Fel Mastery
         enabled = true,
         onlyHavoc = true,
-        lvl = 3,
+        lvl = 6,
         clr = {0,0.4,0.4,1},
         useClr = {0,1,1,1},
         -- events = {E_CLEU, E_SUU, E_PEW},
@@ -321,7 +327,7 @@ dfs = {
       [FB] = { -- Felblade
         enabled = true,
         bothEnabled = true,
-        lvl = 5,
+        lvl = 7,
         clr = {0.6,0,0.6,1},
         useClr = {1,0,1,1},
         events = {E_CLEU, E_SUU, E_PEW},
@@ -334,13 +340,14 @@ dfs = {
         end,
         onTalentUpdate = function(self)
           self.value = self.available and (isVengeance and felblade_pain or felblade_fury) or 0
+          self:Accumulate()
         end
       },
 
       [VR] = { -- Vengeful Retreat
         enabled = true,
         onlyHavoc = true,
-        lvl = 7, -- strata
+        lvl = 8, -- strata
         clr = {0,0.4,0,1}, -- color
         useClr = {0,0.6,0,1},
         events = {E_CLEU, E_PEW},
@@ -361,7 +368,7 @@ dfs = {
 
       [IA] = { -- Immolation Aura
         enabled = true,
-        lvl = 4,
+        lvl = 3,
         clr = pwrGainClr,
         events = {E_UPF, E_PEW},
         gain = immolation_aura_pain_per_sec,
@@ -373,7 +380,7 @@ dfs = {
       [Pp] = { -- Prepared
         enabled = true,
         onlyHavoc = true,
-        lvl = 2,
+        lvl = 5,
         clr = pwrGainClr,
         events = {E_UPF, E_PEW},
         gain = prepared_fury_per_sec,
@@ -384,7 +391,7 @@ dfs = {
 
       [BT] = { -- Blade Turning
         enabled = true,
-        lvl = 3,
+        lvl = 4,
         clr = pwrGainClr,
         events = {E_UA, E_PEW},
         gain = blade_turning_total_gain,
@@ -410,7 +417,7 @@ dfs = {
       power = {
         enabled = true,
         bothEnabled = true,
-        lvl = 8,
+        lvl = 10,
         clr = {1,1,0,1},
         events = {E_UPF, E_PEW},
         Update = function(self)
@@ -445,7 +452,7 @@ dfs = {
 
       [FoS] = { -- Feast of Souls
         enabled = true,
-        lvl = 5,
+        lvl = 6,
         clr = {0,0.4,0,1},
         useClr = {0,0.6,0,1},
         events = {E_UPF, E_PEW},
@@ -466,7 +473,7 @@ dfs = {
 
       [SCl] = { -- Soul Cleave
         enabled = true,
-        lvl = 6,
+        lvl = 7,
         clr = {0,0.6,0,1},
         useClr = {0,1,0,1},
         events = {E_UPF, E_CLEU, E_PEW},
@@ -497,7 +504,7 @@ dfs = {
 
       [SCa] = { -- Soul Carver
         enabled = true,
-        lvl = 4,
+        lvl = 5,
         clr = {0.6,0,0.6,1},
         useClr = {1,0,1,1},
         crit = false,
@@ -518,18 +525,62 @@ dfs = {
           return SCl.enabled and SCl.healCount and SCl.healCount + soul_carver_soul_fragment_count <= soul_fragment_cap
         end
       },
+
+      [FD] = { -- Fel Devastation
+        enabled = true,
+        lvl = 4,
+        clr = {0.5,0.25,0,1},
+        useClr = {1,0.5,0,1},
+        crit = false,
+        events = {E_CLEU, E_SUU, E_PEW},
+        Update = function(self,e,...)
+          self:UpdateAvailability(function()
+            if self.available then
+              self:GetHeal(1)
+            else
+              self.value = 0
+            end
+          end,e,...)
+        end,
+
+        useClrPredicate = function(self)
+          local h = sections[hp].current.health
+          local p = sections[pwr].current.power
+          return self.latestAccumulatedValue <= h.actualMaxValue and p.value >= fel_devastation_pain_cost
+        end
+      },
     },
 
     [gain] = { -- definitive health gains of active buffs
 
       [FoS] = { -- Feast of Souls
         enabled = true,
-        lvl = 7,
+        lvl = 9,
         crit = false,
         clr = {0.6,0.6,0.6,1},
         events = {E_UHF, E_PEW},
         Update = function(self,e,...)
           self:Gain(true,self:GetHeal(1,nil,true))
+        end
+      },
+
+      [FD] = { -- Fel Devastation
+        enabled = true,
+        lvl = 8,
+        crit = false,
+        clr = {0.6,0.6,0.6,1},
+        events = {E_UHF, E_PEW, E_USCSA, E_USCSO, E_USCU},
+        Update = function(self,e,...)
+          if self.enabled then
+            local n,_,_,_,startTime,endTime = UnitChannelInfo(p)
+            if n == self.spell then
+              local duration = endTime - startTime
+              local remaining = endTime - GetTime() * 1000
+              self.value = (remaining/duration)*self:GetHeal(1,nil,true)
+            else
+              self.value = 0
+            end
+          end
         end
       }
     },
@@ -539,7 +590,7 @@ dfs = {
       health = {
         enabled = true,
         bothEnabled = true,
-        lvl = 8,
+        lvl = 10,
         clr = {1,1,1,1},
         events = {E_UHF, E_PEW},
         Update = function(self)
@@ -629,9 +680,13 @@ local Section = {
   Show = function(self) self.directParent:Show() end,
   Hide = function(self) self.directParent:Hide() end,
   Disable = function(self)
-    self:HideBar() self.enabled = false
+    -- self:HideBar()
+    self:SetBarValue(0)
+    self.enabled = false
   end,
-  Enable = function(self) self:ShowBar()
+  Enable = function(self)
+    -- self:SetBarValue(self.latestAccumulatedValue)
+    -- self:ShowBar()
     self.enabled = true
   end,
 
@@ -660,7 +715,12 @@ local Section = {
 
   GetHeal = function(self, baseMulti, additiveHeal, forGain) -- resulting heal of next spell cast (prediction)
     if self.enabled then
-      local h1,h2 = GetSpellDescription(self.healSpell):match("(%d+)%p(%d+)")
+      local matches = {}
+      for match in  GetSpellDescription(self.healSpell):gmatch("(%d+%p%d+)") do
+        table.insert(matches,match)
+      end
+      local h1,h2 = matches[#matches]:match("(%d+)%p(%d+)")
+      -- local h1,h2 = GetSpellDescription(self.healSpell):gmatch("(%d+)%p(%d+)")
       local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit()
       if forGain then
         return res
@@ -917,7 +977,7 @@ function Section:New(res,type,id) -- constructor for new sections
   else
     n.bar:SetPoint("BOTTOMRIGHT")
   end
-  n.bar:SetFrameStrata(lvlToStrata[n.lvl])
+  -- n.bar:SetFrameStrata(lvlToStrata[n.lvl])
   n.bar:SetMinMaxValues(0,maxValue * n.multi)
   if id == background then
     n.bar:SetValue(maxValue * n.multi)
@@ -929,6 +989,36 @@ end
 
 
 ------------------------ utility functions ------------------------------------
+
+local function OrderSections()
+  local function SetRelations(ordered)
+    for i,s in ipairs(ordered) do
+      local parent = ordered[i+1]
+      if parent then
+        s.bar:SetParent(parent.bar)
+      end
+    end
+  end
+
+  -- put all sections in an array that can be ordered (lvls in descending order)
+  local orderedHp = {}
+  local orderedPwr = {}
+  IterateSections(function(res,type,id)
+    local s = sections[res][type][id]
+    if s.res == hp then
+      table.insert(orderedHp,s)
+    else
+      table.insert(orderedPwr,s)
+    end
+  end)
+  -- order the array of sections according to their level
+  table.sort(orderedHp, function(s1,s2) return s1.lvl > s2.lvl end)
+  table.sort(orderedPwr, function(s1,s2) return s1.lvl > s2.lvl end)
+  -- loop over the ordered array and make every section the child of its predecessor with a lower level
+  SetRelations(orderedHp)
+  SetRelations(orderedPwr)
+
+end
 
 -- reacts to changes of artifact traits
 -- relevant for Soul Carver and Devour Souls
@@ -965,6 +1055,8 @@ function UpdateTalents(refreshFunc)
   if isVengeance then
     core(FoSL,hp,gain,FoS)
     core(FoSL,hp,pre,FoS)
+    core(FDL,hp,pre,FD)
+    core(FDL,hp,gain,FD)
   else
     core(PpL,pwr,pre,VR)
     core(PpL,pwr,gain,Pp)
@@ -1002,6 +1094,7 @@ local function SetupFrames()
 
   frame:SetPoint("TOPLEFT")
   frame:SetPoint("BOTTOMRIGHT")
+  frame:SetFrameStrata("BACKGROUND")
 
   pwrFrame:SetWidth(pwrs.w)
   pwrFrame:SetHeight(pwrs.h)
@@ -1066,12 +1159,12 @@ local function Init()
   for res, resTable in pairs(dfs) do
     for type, typeTable in pairs(resTable) do
       for id, idTable in pairs(typeTable) do
-        if BarsOfVengeanceUserSettings[res][type][id].enabled then
+        -- if BarsOfVengeanceUserSettings[res][type][id].enabled then
           local s = Section:New(res,type,id)
           HookPostUpdate(s)
           GatherEventHandlers(s, eventHandlers)
           sections[res][type][id] = s
-        end
+        -- end
       end
     end
   end
@@ -1104,4 +1197,5 @@ end
 if select(3,UnitClass(p)) == CLASS_ID then
   SetupFrames()
   Init()
+  OrderSections()
 end
