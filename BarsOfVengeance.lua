@@ -356,7 +356,7 @@ dfs = {
         end,
         useClrPredicate = function(self)
           local h = sections[hp].current.health
-          return h.value / h.actualMaxValue < 0.3
+          return h.value / (h.actualMaxValue ~= 0 and h.actualMaxValue or 1) < 0.3
         end,
       },
 
@@ -564,9 +564,9 @@ dfs = {
           local p = sections[pwr].current.power
           return self.latestAccumulatedValue <= h.actualMaxValue and p.value >= fel_devastation_pain_cost
         end,
-        onTalentUpdate = function(self)
-          self.value = 0
-        end
+      --   onTalentUpdate = function(self)
+      --
+      --   end
       },
     },
 
@@ -703,7 +703,7 @@ local Section = {
   Hide = function(self) self.directParent:Hide() end,
   Disable = function(self)
     self.bar:SetValue(0)
-    self.latestAccumulatedValue = 0
+    -- self.latestAccumulatedValue = 0
     self.enabled = false
   end,
   Enable = function(self)
@@ -783,6 +783,8 @@ local Section = {
       end
       func(self)
       self:PropagateBelow(0, func, true)
+    else
+      self.bar:SetValue(0)
     end
   end,
 
@@ -823,14 +825,16 @@ local Section = {
         self.bar:SetValue((maxHealth + absorbs) / maxHealth * maxValue)
        end
      else
-      self.bar:SetValue((value/self.actualMaxValue)*maxValue)
+      self.bar:SetValue((self.actualMaxValue ~= 0 and (value/self.actualMaxValue) or 1)*maxValue)
      end
     end
   end,
 
   SetMaxValue = function(self, actualMaxValue)
-    self.actualMaxValue = actualMaxValue
-    self:SetBarValue(self.latestAccumulatedValue)
+    if self.id ~= background then
+      self.actualMaxValue = actualMaxValue
+      self:SetBarValue(self.latestAccumulatedValue)
+    end
   end,
 
   SetNeighbours = function(self)
@@ -914,7 +918,8 @@ local Section = {
                self:Show()
              end
           else
-            if (pew and UnitHealth(p) or sections[hp].current.health.value) / (pew and UnitHealthMax(p) or sections[hp].current.health.actualMaxValue) * 100 >= self.hideHealthThreshold  then
+            local uhm = UnitHealthMax(p)
+            if (pew and UnitHealth(p) or sections[hp].current.health.value) / (pew and uhm ~= 0 and uhm or sections[hp].current.health.actualMaxValue ~= 0 and sections[hp].current.health.actualMaxValue or 1) * 100 >= self.hideHealthThreshold  then
               self:Hide()
             else
               self:Show()
@@ -1011,6 +1016,7 @@ end
 ------------------------ utility functions ------------------------------------
 
 local function OrderSections()
+
   local function SetRelations(ordered)
     for i,s in ipairs(ordered) do
       local parent = ordered[i+1]
