@@ -89,6 +89,7 @@ local E_SUC = "SPELL_UPDATE_CHARGES"
 local E_USCSA = "UNIT_SPELLCAST_CHANNEL_START"
 local E_USCSO = "UNIT_SPELLCAST_CHANNEL_STOP"
 local E_USCU = "UNIT_SPELLCAST_CHANNEL_UPDATE"
+local E_CRU = "COMBAT_RATING_UPDATE"
 --------------------------------------------------------------------------------
 
 
@@ -167,13 +168,11 @@ local onCDFuncs = {
   end,
 }
 
-local function selector(n,...) return select(n,...) end
-
 local doseAuraEvents = {
   SPELL_AURA_APPLIED = function() return 1 end,
   SPELL_AURA_REMOVED = function() return 0 end,
-  SPELL_AURA_REMOVED_DOSE = selector,
-  SPELL_AURA_APPLIED_DOSE = selector
+  SPELL_AURA_REMOVED_DOSE = select,
+  SPELL_AURA_APPLIED_DOSE = select
 }
 
 local absoluteAuraEvents = {
@@ -237,6 +236,7 @@ local otherEvents = {
     onCD[VR] = 0
     self:UpdateResource()
     self:AutoVisibility(true)
+    self:StatsUpdated()
     UpdateArtifactTraits()
     UpdateTalents()
   end,
@@ -265,6 +265,10 @@ local otherEvents = {
   PLAYER_TALENT_UPDATE = function()
     UpdateTalents()
   end,
+
+  COMBAT_RATING_UPDATE = function(self)
+    self:StatsUpdated()
+  end
 }
 
 local function triggerOther(self,e,...)
@@ -344,21 +348,21 @@ dfs = {
         end
       },
 
-      [Me] = { -- Metamorphosis
-        enabled = true,
-        lvl = 2,
-        clr = {0.5,0.25,0,1},
-        useClr = {1,0.5,0,1},
-        gain = metamorphosis_total_gain,
-        events = {E_CLEU, E_SUU, E_PEW, E_PSC},
-        Update = function(self,e,...)
-          self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
-        end,
-        useClrPredicate = function(self)
-          local h = sections[hp].current.health
-          return h.value / (h.actualMaxValue ~= 0 and h.actualMaxValue or 1) < 0.3
-        end,
-      },
+      -- [Me] = { -- Metamorphosis
+      --   enabled = true,
+      --   lvl = 2,
+      --   clr = {0.5,0.25,0,1},
+      --   useClr = {1,0.5,0,1},
+      --   gain = metamorphosis_total_gain,
+      --   events = {E_CLEU, E_SUU, E_PEW, E_PSC},
+      --   Update = function(self,e,...)
+      --     self:UpdateAvailability(function() self.value = self.available and self.gain or 0 end,e,...)
+      --   end,
+      --   useClrPredicate = function(self)
+      --     local h = sections[hp].current.health
+      --     return h.value / (h.actualMaxValue ~= 0 and h.actualMaxValue or 1) < 0.3
+      --   end,
+      -- },
 
       [VR] = { -- Vengeful Retreat
         enabled = true,
@@ -450,9 +454,9 @@ dfs = {
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200, -- width of power bars
-        h = 15, -- height of power bars
+        h = 12.5, -- height of power bars
         x = 0, -- x-offset of power bars from the addons' parent frame
-        y = -170, -- equivalent y-offset
+        y = -165, -- equivalent y-offset
         sbt = "Interface\\AddOns\\BarsOfVengeance\\media\\texture.tga", -- status bar texture used for power bars
         events = {E_PEW, E_PRE, E_PRD},
         Update = function(self,e,...)
@@ -630,11 +634,11 @@ dfs = {
         lvl = 1,
         clr = {0,0,0,0.5},
         w = 200,
-        h = 15,
+        h = 12.5,
         x = 0,
         y = -150,
         sbt = "Interface\\AddOns\\BarsOfVengeance\\media\\texture.tga",
-        events = {E_PEW, E_PRE, E_PRD, E_PTU, E_SC, E_PSC},
+        events = {E_PEW, E_PRE, E_PRD, E_PTU, E_SC, E_PSC, E_CRU},
         Update = function(self,e,...)
           triggerOther(self,e,...)
         end
@@ -685,6 +689,7 @@ sections = {
 -- a section represents a piece/section of the health display but only pertains to
 -- its underlying spell (gain / prediciton)
 local Section = {
+  versatility = 1,
   parent = frame, --the addon's base frame
   enabled = true, -- whether or not the section is enabled
   value = 0, -- the current value of the section (e.g. for how much your next Soul Cleave would heal you)
@@ -740,8 +745,7 @@ local Section = {
         table.insert(matches,match)
       end
       local h1,h2 = matches[#matches]:match("(%d+)%p(%d+)")
-      -- local h1,h2 = GetSpellDescription(self.healSpell):gmatch("(%d+)%p(%d+)")
-      local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit()
+      local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit() * self.versatility
       if forGain then
         return res
       else
@@ -926,6 +930,10 @@ local Section = {
             end
           end
         end
+    end,
+
+    StatsUpdated = function(self)
+      self.versatility = (GetCombatRatingBonus(CR_VERSATILITY_DAMAGE_DONE) + GetVersatilityBonus(CR_VERSATILITY_DAMAGE_DONE)) / 100 + 1
     end,
 
     UpdateColor = function(self)
