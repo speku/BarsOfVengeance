@@ -26,6 +26,7 @@ local FR = 195072 -- Fel Rush
 local FM = 192939 -- Fel Mastery
 local Mo = 206476 -- Momentum
 local FD = 212084 -- Fel Devastation
+local SB = 227225 -- Soul Barrier
 -------------------------------------------------------------------------------
 
 
@@ -105,10 +106,20 @@ local PpL = {row = 2, column = 1} -- Prepared location
 local FBL = {row = 3, column = 1} -- Felblade location
 local FML = {row = 1, column = 1} -- Fel Mastery location
 local FDL = {row = 6, column = 1} -- Fel Devastation location
+local SBL = {row = 7, column = 3} -- Soul Barrier location
 local devour_souls_scalar = 1 -- Devour Souls scalar
-local soul_cleave_formula = function(ap) return ap * 5 end -- formula for calculating the minimal heal of Soul Cleave
+local soul_cleave_formula = function(ap) return ap * 5.5 end -- formula for calculating the minimal heal of Soul Cleave
+local soul_cleave_pattern = "(%d+)%p(%d+),"
+local soul_barrier_pattern = "absorbing (%d+)%p(%d+)"
+local parseHeal = function(spell,pattern)
+  local h1,h2 = GetSpellDescription(spell):match(pattern)
+  return tonumber(h1..h2)
+end
+local soul_cleave_formula_parsed = function(spell) return parseHeal(spell,soul_cleave_pattern) end
+local soul_barrier_formula_parsed = function(spell) return parseHeal(spell,soul_barrier_pattern) end
 local soul_cleave_min_cost = 30 -- the minimal cost of Soul Cleave
 local soul_cleave_max_cost = 60 -- the maximal cost of Soul Cleave
+local soul_barrier_cost = 60 -- cost of Soul Barrier
 local soul_carver_soul_fragment_count = 5 -- how many Soul Fragments are spawned by Soul Carver
 local soul_fragment_cap = 5
 local immolation_aura_pain_per_sec = 20/6
@@ -477,8 +488,9 @@ dfs = {
         useClr = {0,0.6,0,1},
         events = {E_UPF, E_PEW, E_PSC},
         Update = function(self)
+          local sb = sections[hp][pre][SB]
           local power = sections[pwr].current.power.value
-          if power >= soul_cleave_min_cost then
+          if power >= soul_cleave_min_cost and not (sb.enabled and sb.available) then
             self:GetHeal(1)
           else
             self.value = 0
@@ -493,7 +505,8 @@ dfs = {
 
       [SCl] = { -- Soul Cleave
         enabled = true,
-        lvl = 7,
+        crit = false,
+        lvl = 8,
         clr = {0,0.6,0,1},
         useClr = {0,1,0,1},
         events = {E_UPF, E_CLEU, E_PEW, E_PSC},
@@ -505,11 +518,12 @@ dfs = {
           end
 
           local power = sections[pwr].current.power.value
+          local sb = sections[hp][pre][SB]
 
-          if power >= soul_cleave_min_cost then
+          if power >= (sb.enabled and sb.available and soul_barrier_cost or soul_cleave_min_cost) then
             power = power > soul_cleave_max_cost and soul_cleave_max_cost or power
             function func()
-              return soul_cleave_formula(self:GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar
+              return sb.enabled and sb.available and 0 or (soul_cleave_formula(self:GetAP()) * (power / soul_cleave_max_cost) * 2 * devour_souls_scalar)
             end
             self:GetHeal(nil,func)
           else
@@ -521,6 +535,36 @@ dfs = {
           return self.healCount and self.healCount == soul_fragment_cap
         end
       },
+
+
+      [SB] = { -- Soul Barrier
+        enabled = true,
+        crit = false,
+        lvl = 7,
+        multi = 2,
+        clr = {0.6,0.6,0,1},
+        useClr = {1,1,0,1},
+        events = {E_CLEU, E_SUU, E_SC, E_PEW, E_PSC,E_UPF},
+        healSpell = GetSpellInfo(Sh),
+        healCountSpell = SF,
+        Update = function(self,e,...)
+          if e == E_CLEU then
+            self:UpdateAura(...)
+          end
+          self:UpdateAvailability(function()
+            if self.available then
+                self:GetHeal(nil, function() return soul_barrier_formula_parsed(self.spell) end)
+            else
+              self.value = 0
+            end
+          end,e,...)
+        end,
+
+        useClrPredicate = function(self)
+          return self.healCount and self.healCount == soul_fragment_cap
+        end
+      },
+
 
       [SCa] = { -- Soul Carver
         enabled = true,
@@ -541,8 +585,8 @@ dfs = {
         end,
 
         useClrPredicate = function(self)
-          local SCl = sections[self.res][self.type][SCl]
-          return SCl.enabled and SCl.healCount and SCl.healCount + soul_carver_soul_fragment_count <= soul_fragment_cap
+          local SCa = sections[self.res][self.type][SCa]
+          return SCa.enabled and SCa.healCount and SCa.healCount + soul_carver_soul_fragment_count <= soul_fragment_cap
         end
       },
 
@@ -578,7 +622,7 @@ dfs = {
 
       [FoS] = { -- Feast of Souls
         enabled = true,
-        lvl = 9,
+        lvl = 10,
         crit = false,
         clr = {0.6,0.6,0.6,1},
         events = {E_UHF, E_PEW, E_PSC},
@@ -589,7 +633,7 @@ dfs = {
 
       [FD] = { -- Fel Devastation
         enabled = true,
-        lvl = 8,
+        lvl = 9,
         crit = false,
         clr = {0.6,0.6,0.6,1},
         events = {E_UHF, E_PEW, E_USCSA, E_USCSO, E_USCU, E_PSC},
@@ -616,7 +660,7 @@ dfs = {
       health = {
         enabled = true,
         bothEnabled = true,
-        lvl = 10,
+        lvl = 11,
         clr = {1,1,1,1},
         events = {E_UHF, E_PEW, E_PSC},
         Update = function(self)
@@ -745,7 +789,7 @@ local Section = {
         table.insert(matches,match)
       end
       local h1,h2 = matches[#matches]:match("(%d+)%p(%d+)")
-      local res = ((additiveHeal and additiveHeal() or 0) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit() * self.versatility
+      local res = ((additiveHeal and additiveHeal() or 0) * (self.id ~= 227225 and self.versatility or 1) + tonumber(h1..h2) * (baseMulti and baseMulti or self.healCount)) * self:GetCrit()
       if forGain then
         return res
       else
@@ -828,6 +872,8 @@ local Section = {
        else
         self.bar:SetValue((maxHealth + absorbs) / maxHealth * maxValue)
        end
+     elseif self.id == 227225 and not self.available then -- Soul Barrier
+       self.bar:SetValue(0)
      else
       self.bar:SetValue((self.actualMaxValue ~= 0 and (value/self.actualMaxValue) or 1)*maxValue)
      end
@@ -1082,7 +1128,7 @@ end
 -- reacts to talent updates
 function UpdateTalents(refreshFunc)
   local function core(l,res,type,id)
-    local f = select(2, GetTalentTierInfo(l.row, l.column)) == 1 and "Enable" or "Disable"
+    local f = select(9, GetTalentInfo(l.row, l.column, GetActiveSpecGroup())) and "Enable" or "Disable"
     Invoke(res,type,id,f)
   end
 
@@ -1091,6 +1137,7 @@ function UpdateTalents(refreshFunc)
     core(FoSL,hp,pre,FoS)
     core(FDL,hp,pre,FD)
     core(FDL,hp,gain,FD)
+    core(SBL,hp,pre,SB)
   else
     core(PpL,pwr,pre,VR)
     core(PpL,pwr,gain,Pp)
