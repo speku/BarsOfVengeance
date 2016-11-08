@@ -864,13 +864,14 @@ local Section = {
   SetBarValue = function(self, value)
     if self.id ~= background then
       if self.id == over then
+       local sb = sections[hp][pre][SB].value
        local health = sections[hp].current.health.value
        local maxHealth = sections[hp].current.health.actualMaxValue
        local absorbs = sections[hp].absorbs.current.value
-       if absorbs + health <= maxHealth then
+       if absorbs + health + sb <= maxHealth then
         self.bar:SetValue(0)
        else
-        self.bar:SetValue((maxHealth + absorbs) / maxHealth * maxValue)
+        self.bar:SetValue((maxHealth + absorbs + sb) / maxHealth * maxValue)
        end
      elseif self.id == 227225 and not self.available then -- Soul Barrier
        self.bar:SetValue(0)
