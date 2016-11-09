@@ -288,6 +288,13 @@ local function triggerOther(self,e,...)
   end
 end
 
+local function normalize(self,value)
+  if not (self.id == SCa or self.id == SB or self.id == FD or self.type == absorbs or (self.id == FoS and self.type == pre)) then
+    return value > self.actualMaxValue and self.actualMaxValue or value
+  end
+  return value
+end
+
 
 ------------------------------- settings ---------------------------------------
 
@@ -707,7 +714,7 @@ dfs = {
         bothEnabled = true,
         lvl = 2,
         clr = {0,1,1,1},
-        multi = 2
+        multi = 2,
       }
     },
   }
@@ -827,7 +834,7 @@ local Section = {
     if self.enabled then
       self.latestAccumulatedValue = self:PropagateAbove()
       local func = function(self)
-        self:SetBarValue(self.latestAccumulatedValue)
+        self:SetBarValue(normalize(self,self.latestAccumulatedValue))
       end
       func(self)
       self:PropagateBelow(0, func, true)
@@ -865,13 +872,15 @@ local Section = {
     if self.id ~= background then
       if self.id == over then
        local sb = sections[hp][pre][SB].value
+       local sca = sections[hp][pre][SCa].value
+       local fd = sections[hp][pre][FD].value
        local health = sections[hp].current.health.value
        local maxHealth = sections[hp].current.health.actualMaxValue
        local absorbs = sections[hp].absorbs.current.value
-       if absorbs + health + sb <= maxHealth then
+       if absorbs + health + sb + sca + fd <= maxHealth then
         self.bar:SetValue(0)
        else
-        self.bar:SetValue((maxHealth + absorbs + sb) / maxHealth * maxValue)
+        self.bar:SetValue((maxHealth + absorbs + sb + sca + fd) / maxHealth * maxValue)
        end
      elseif self.id == 227225 and not self.available then -- Soul Barrier
        self.bar:SetValue(0)
